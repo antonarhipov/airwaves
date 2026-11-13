@@ -7,17 +7,17 @@ WebGL implementations on macOS (Metal/ANGLE) and several desktop GPUs clamp `gl_
 To eliminate hardware point-size caps, `SplashRenderer` uses `THREE.InstancedBufferGeometry` with a `2 × 2` unit quad instanced `particleCount` times ([src/rendering/SplashRenderer.ts](file:///Users/anton/IdeaProjects/splashes/src/rendering/SplashRenderer.ts)):
 
 - Per-instance attributes: `aOffset (x, y, z)`, `aVelocity (vx, vy)`, and `aAttr (tColor, sizeSeed, energy, bokehFactor)`.
-- In `PARTICLE_VERTEX_SHADER` ([src/rendering/shaders.ts](file:///Users/anton/IdeaProjects/splashes/src/rendering/shaders.ts)), particle radii scale proportionally to `uResolution.y / 1080.0`, ensuring identical optical proportions between the live preview and 4K exports.
-- Sharp in-focus sparks stretch subtly along their velocity vector (`dir = normalize(aVelocity)`), while out-of-focus bokeh particles relax toward circular discs.
+- In `PARTICLE_VERTEX_SHADER` ([src/rendering/shaders.ts](file:///Users/anton/IdeaProjects/splashes/src/rendering/shaders.ts)), particle radii scale proportionally to `uResolution.y / 1080.0` with a `>= 0.76px` sub-pixel floor, preserving crisp pinpoint dust across both preview sizes and 4K exports.
+- Sharp in-focus sparks stretch subtly along their velocity vector (`dir = normalize(aVelocity)`), while out-of-focus bokeh particles and peak caustic glint stars relax toward symmetrical shapes.
 
-## 2. Optical Depth of Field (Circle of Confusion)
+## 2. Optical Depth of Field (Circle of Confusion) & Star Glints
 
-Every particle carries a depth coordinate $z \in [-1, 1]$ (core caustic particles cluster near $z \approx 0$, while dispersed and ambient particles span foreground/background depths). In the vertex and fragment shaders:
+Every particle carries a depth coordinate $z \in [-1, 1]$ (core caustic particles cluster near $z \approx 0$, while peripheral bokeh orbs span foreground/background depths). In the vertex and fragment shaders:
 
 1. **Circle of Confusion**: $\text{coc} = |z - \text{uFocalPlane}| \cdot \text{uDofStrength}$.
-2. **Aperture Expansion**: Quad radius expands by $(1 + 2.6 \cdot \text{coc})$.
-3. **Profile Morphing**: `blurBlend = clamp(coc * 0.92, 0.0, 1.0)` blends between a sharp dual-Gaussian pinpoint spark (`exp(-r2 * 13.0) * 0.62 + exp(-r2 * 4.0) * 0.16`) and a soft optical lens bokeh disc (`smoothstep`).
-4. **Energy Conservation**: Intensity is attenuated by `1.0 / (1.0 + coc * coc * 4.2)` so expanded bokeh discs remain translucent rather than overexposing the scene.
+2. **Aperture Expansion**: Quad radius expands by $(1 + 2.8 \cdot \text{coc})$.
+3. **Profile Morphing & Star Glints**: `blurBlend = clamp(coc * 0.92, 0.0, 1.0)` blends between a razor-crisp dual-Gaussian pinpoint spark (`exp(-r2 * 14.5) * 0.85 + exp(-r2 * 4.5) * 0.14`) and a soft optical bokeh disc (`smoothstep`). Peak-energy particles (`vEnergy > 1.42` in focus) add 4-point diffraction star rays (`starRays`).
+4. **Energy Conservation**: Intensity is attenuated by `1.0 / (1.0 + coc * coc * 2.25)` so expanded colored bokeh discs remain luminous and translucent without hazing the background sky.
 5. **Density Normalization**: `SplashRenderer` computes `uDensityNorm = clamp(sqrt(28000 / particleCount), 0.55, 1.45)` so changing particle count from `5k` to `100k` preserves balanced contrast.
 
 ## 3. Multi-Pass HDR Bloom & Tone Mapping

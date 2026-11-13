@@ -27,14 +27,14 @@ export const BG_FRAGMENT_SHADER = /* glsl */ `
     p.x *= uAspect;
 
     // Subtle atmospheric entry/exit glows matching airwave colors
-    float leftGlow = exp(-length(p - vec2(-0.95 * uAspect, -0.15)) * 1.65);
-    float rightGlow = exp(-length(p - vec2(0.82 * uAspect, 0.32)) * 1.45);
+    float leftGlow = exp(-length(p - vec2(-0.92 * uAspect, -0.14)) * 1.55);
+    float rightGlow = exp(-length(p - vec2(0.84 * uAspect, 0.34)) * 1.45);
     float centerHaze = exp(-length(p * vec2(0.55, 1.25)) * 2.1);
 
     vec3 col = uBgColor;
-    col += uColor0 * leftGlow * 0.18 * uAmbientGlow;
-    col += uColor3 * rightGlow * 0.10 * uAmbientGlow;
-    col += mix(uColor0, uColor3, 0.5) * centerHaze * 0.035 * uAmbientGlow;
+    col += uColor0 * leftGlow * 0.22 * uAmbientGlow;
+    col += uColor3 * rightGlow * 0.12 * uAmbientGlow;
+    col += mix(uColor0, uColor3, 0.5) * centerHaze * 0.03 * uAmbientGlow;
 
     // Subtle vignette
     float vig = 1.0 - smoothstep(0.65, 1.55, length(vUv - 0.5) * 1.65);
@@ -97,14 +97,15 @@ export const LINE_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    vec3 col = samplePalette(vT);
+    vec3 baseCol = samplePalette(vT);
+    vec3 col = mix(baseCol, vec3(1.0, 0.98, 0.96), 0.18 * clamp(vAlpha, 0.0, 1.0));
     float pulse = 1.0;
     if (uAnimate > 0.5) {
       pulse = 0.85 + 0.22 * sin(vT * 10.0 - uTime * 1.8);
     }
-    float alpha = vAlpha * uOpacity * 0.46 * pulse;
+    float alpha = vAlpha * uOpacity * 0.54 * pulse;
     if (alpha < 0.002) discard;
-    gl_FragColor = vec4(col * uBrightness * 0.85 * alpha, alpha);
+    gl_FragColor = vec4(col * uBrightness * 0.95 * alpha, alpha);
   }
 `;
 
@@ -167,14 +168,17 @@ export const PARTICLE_VERTEX_SHADER = /* glsl */ `
     float coc = abs(z - uFocalPlane) * uDofStrength;
     vCoc = coc;
 
-    // Base radius in logical reference pixels (scaled proportionally to viewport height)
+    // Base radius in logical reference pixels (keep floor >= 0.76px so fine grains remain crisp)
     float scaleRef = uResolution.y / 1080.0;
-    float basePx = aAttr.y * uParticleSize * 1.45 * scaleRef;
-    float radiusPx = basePx * (1.0 + coc * 2.6);
-    radiusPx = clamp(radiusPx, 0.7 * scaleRef, 56.0 * scaleRef);
+    float glintBoost = 1.0 + max(0.0, vEnergy - 1.42) * 3.8 * (1.0 - clamp(coc * 2.0, 0.0, 1.0));
+    float basePx = aAttr.y * uParticleSize * 1.24 * scaleRef * glintBoost;
+    float radiusPx = basePx * (1.0 + coc * 2.8);
+    float minRadius = mix(max(0.76, 0.92 * scaleRef), 2.0 * scaleRef, clamp(coc, 0.0, 1.0));
+    radiusPx = clamp(radiusPx, minRadius, 56.0 * scaleRef);
 
     // Subtle velocity stretch for sharp in-focus sparks, round for bokeh
-    float stretch = 1.0 + max(0.0, 1.0 - coc * 1.5) * 0.5 * vEnergy;
+    float isGlint = step(1.42, vEnergy);
+    float stretch = mix(1.0 + max(0.0, 1.0 - coc * 1.5) * 0.45 * vEnergy, 1.0, isGlint);
     vec2 dir = normalize(aVelocity + vec2(0.0001));
     vec2 perp = vec2(-dir.y, dir.x);
     vec2 localQuad = dir * (position.x * stretch) + perp * position.y;
@@ -216,20 +220,25 @@ export const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
     float r = sqrt(r2);
 
     // Sharp spark profile vs optical DoF bokeh disc
-    float sharpCore = exp(-r2 * 13.0) * 0.62 + exp(-r2 * 4.0) * 0.16;
-    float bokehDisc = smoothstep(1.0, 0.58, r) * (0.16 + 0.09 * smoothstep(0.45, 0.88, r));
+    float sharpCore = exp(-r2 * 14.5) * 0.85 + exp(-r2 * 4.5) * 0.14;
+    float glintMask = max(0.0, vEnergy - 1.42) * (1.0 - clamp(vCoc * 3.0, 0.0, 1.0));
+    float starRays =
+      exp(-abs(vQuadUv.x) * 18.0) * exp(-abs(vQuadUv.y) * 2.8) +
+      exp(-abs(vQuadUv.y) * 18.0) * exp(-abs(vQuadUv.x) * 2.8);
+    sharpCore += glintMask * starRays * 1.65;
+    float bokehDisc = smoothstep(1.0, 0.58, r) * (0.24 + 0.14 * smoothstep(0.45, 0.88, r));
 
     float blurBlend = clamp(vCoc * 0.92, 0.0, 1.0);
     float profile = mix(sharpCore, bokehDisc, blurBlend);
 
-    // Conserve luminous energy when particle spreads out of focus
-    float areaDamp = 1.0 / (1.0 + vCoc * vCoc * 4.2);
-    float intensity = profile * areaDamp * (0.18 + 1.05 * vEnergy) * uDensityNorm;
+    // Balanced DoF attenuation so sparse bokeh circles stay luminous & colorful without smoking out sky
+    float areaDamp = 1.0 / (1.0 + vCoc * vCoc * 2.25);
+    float intensity = profile * areaDamp * (0.28 + 1.18 * vEnergy) * uDensityNorm;
 
     vec3 baseCol = samplePalette(vT);
-    // Crisp specular center highlight only for high-energy in-focus sparks
-    float hotCenter = smoothstep(0.36, 0.0, r) * (1.0 - blurBlend) * vEnergy * 0.48;
-    vec3 col = mix(baseCol, vec3(1.0, 0.98, 0.96), hotCenter);
+    // Crisp specular pinpoint highlight preserving rich palette saturation along spine
+    float hotCenter = smoothstep(0.32, 0.0, r) * (1.0 - blurBlend) * vEnergy * 0.34;
+    vec3 col = mix(baseCol, vec3(1.0, 0.98, 0.95), clamp(hotCenter, 0.0, 0.72));
 
     float alpha = clamp(intensity * uTransparency, 0.0, 1.0);
     if (alpha < 0.002) discard;

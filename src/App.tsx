@@ -106,6 +106,8 @@ export function App() {
       'radial-flow',
     ];
     const fieldModes: FieldMode[] = [
+      'acoustic-caustic',
+      'airflow-streamlines',
       'harmonic-ribbon',
       'curl-noise',
       'vortex-stream',
@@ -134,25 +136,31 @@ export function App() {
               : 'diagonal',
         flowAngle: Math.round(-30 + Math.random() * 60),
         fieldMode: nextField,
-        curvature: Math.round((0.55 + Math.random() * 1.1) * 100) / 100,
-        turbulence: Math.round((0.25 + Math.random() * 0.95) * 100) / 100,
-        dispersion: Math.round((0.22 + Math.random() * 0.55) * 100) / 100,
-        vortexStrength: Math.round((-0.8 + Math.random() * 2.1) * 100) / 100,
-        guidingCurves: 4 + Math.floor(Math.random() * 8),
-        densityConcentration: Math.round((0.55 + Math.random() * 0.35) * 100) / 100,
+        curvature: Math.round((0.75 + Math.random() * 0.7) * 100) / 100,
+        turbulence:
+          nextField === 'acoustic-caustic'
+            ? Math.round((0.12 + Math.random() * 0.34) * 100) / 100
+            : Math.round((0.25 + Math.random() * 0.75) * 100) / 100,
+        dispersion: Math.round((0.22 + Math.random() * 0.42) * 100) / 100,
+        vortexStrength:
+          nextField === 'acoustic-caustic'
+            ? Math.round((-0.25 + Math.random() * 0.55) * 100) / 100
+            : Math.round((-0.8 + Math.random() * 2.1) * 100) / 100,
+        guidingCurves: nextField === 'acoustic-caustic' ? 8 + Math.floor(Math.random() * 7) : 4 + Math.floor(Math.random() * 8),
+        densityConcentration: Math.round((0.68 + Math.random() * 0.24) * 100) / 100,
         attractors: [
           {
             id: 'att-1',
             x: Math.round((-0.45 + Math.random() * 0.9) * 100) / 100,
             y: Math.round((-0.35 + Math.random() * 0.7) * 100) / 100,
-            strength: Math.round((0.2 + Math.random() * 0.8) * 100) / 100,
+            strength: Math.round((0.12 + Math.random() * 0.45) * 100) / 100,
             radius: Math.round((0.45 + Math.random() * 0.45) * 100) / 100,
           },
           {
             id: 'att-2',
             x: Math.round((-0.45 + Math.random() * 0.9) * 100) / 100,
             y: Math.round((-0.35 + Math.random() * 0.7) * 100) / 100,
-            strength: Math.round((-0.8 + Math.random() * 0.6) * 100) / 100,
+            strength: Math.round((-0.45 + Math.random() * 0.35) * 100) / 100,
             radius: Math.round((0.4 + Math.random() * 0.4) * 100) / 100,
           },
         ],
@@ -199,6 +207,19 @@ export function App() {
           <span className="telemetry-pill" title="Simulation separated from GPU rendering">
             {simData.computeTimeMs} ms sim
           </span>
+          <a
+            className="repo-pill"
+            href="https://github.com/antonarhipov/airwaves"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open antonarhipov/airwaves repository on GitHub"
+            title="View antonarhipov/airwaves on GitHub"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+            </svg>
+            <span>GitHub</span>
+          </a>
         </div>
 
         <div className="header-actions">

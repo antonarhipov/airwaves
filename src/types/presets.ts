@@ -13,6 +13,12 @@ export const PALETTES: Record<Exclude<PaletteId, 'custom'>, PaletteDefinition> =
     stops: ['#ff1b75', '#d946ef', '#6366f1', '#0088ff'],
     background: '#050414',
   },
+  'airflow-prism': {
+    id: 'airflow-prism',
+    name: 'Airflow Cyan ↔ Magenta',
+    stops: ['#ff1e8a', '#9d4edd', '#3b82f6', '#00e5ff'],
+    background: '#030612',
+  },
   'airwaves-champagne': {
     id: 'airwaves-champagne',
     name: 'Champagne → Ice',
@@ -64,25 +70,25 @@ export const EXPORT_WIDTH_OPTIONS = [
 export const DEFAULT_CONFIG: SplashConfig = {
   sim: {
     seed: 'IDEA-2026.3',
-    particleCount: 42000,
-    densityConcentration: 0.74,
+    particleCount: 58000,
+    densityConcentration: 0.84,
     sizeDistribution: 'bimodal-bokeh',
-    sizeVariance: 0.78,
+    sizeVariance: 0.72,
     flowDirection: 'diagonal',
-    flowAngle: -16,
-    curvature: 0.96,
-    turbulence: 0.56,
-    dispersion: 0.42,
-    trailLength: 0.45,
-    fieldMode: 'harmonic-ribbon',
+    flowAngle: -6,
+    curvature: 1.06,
+    turbulence: 0.24,
+    dispersion: 0.34,
+    trailLength: 0.32,
+    fieldMode: 'acoustic-caustic',
     noiseType: 'simplex',
-    noiseScale: 1.32,
-    noiseOctaves: 3,
-    vortexStrength: 0.42,
-    guidingCurves: 7,
+    noiseScale: 1.15,
+    noiseOctaves: 2,
+    vortexStrength: 0.14,
+    guidingCurves: 12,
     attractors: [
-      { id: 'att-1', x: 0.35, y: 0.08, strength: 0.35, radius: 0.65 },
-      { id: 'att-2', x: -0.45, y: 0.32, strength: -0.45, radius: 0.55 },
+      { id: 'att-1', x: 0.38, y: 0.06, strength: 0.22, radius: 0.72 },
+      { id: 'att-2', x: -0.48, y: 0.36, strength: -0.28, radius: 0.58 },
     ],
     composition: 'diagonal-flow',
     safeZone: 'top-left',
@@ -93,18 +99,18 @@ export const DEFAULT_CONFIG: SplashConfig = {
     paletteId: 'jetbrains-amber-blue',
     paletteStops: [...PALETTES['jetbrains-amber-blue'].stops],
     backgroundColor: PALETTES['jetbrains-amber-blue'].background,
-    ambientGlow: 0.58,
-    glowIntensity: 0.62,
-    bloomThreshold: 0.52,
-    dofStrength: 0.95,
-    focalPlane: 0.05,
-    particleSize: 1.0,
-    particleBrightness: 1.24,
-    transparency: 0.9,
-    trailFade: 0.58,
-    guidingCurveOpacity: 0.5,
+    ambientGlow: 0.65,
+    glowIntensity: 0.38,
+    bloomThreshold: 0.62,
+    dofStrength: 1.0,
+    focalPlane: 0.04,
+    particleSize: 0.84,
+    particleBrightness: 1.18,
+    transparency: 0.94,
+    trailFade: 0.48,
+    guidingCurveOpacity: 0.44,
     animateFlow: true,
-    animationSpeed: 0.42,
+    animationSpeed: 0.36,
   },
   typography: {
     showText: true,
@@ -159,13 +165,15 @@ export const STUDIO_PRESETS: StudioPreset[] = [
     config: (() => {
       const c = cloneConfig(DEFAULT_CONFIG);
       c.sim.seed = 'IDEA-2026.3-neon';
-      c.sim.curvature = 1.08;
-      c.sim.guidingCurves = 8;
+      c.sim.curvature = 1.12;
+      c.sim.guidingCurves = 13;
       c.visual.paletteId = 'jetbrains-magenta-blue';
       c.visual.paletteStops = [...PALETTES['jetbrains-magenta-blue'].stops];
       c.visual.backgroundColor = PALETTES['jetbrains-magenta-blue'].background;
-      c.visual.glowIntensity = 0.56;
-      c.visual.particleBrightness = 1.08;
+      c.visual.glowIntensity = 0.42;
+      c.visual.bloomThreshold = 0.60;
+      c.visual.particleBrightness = 1.20;
+      c.visual.guidingCurveOpacity = 0.46;
       return c;
     })(),
   },
@@ -176,18 +184,22 @@ export const STUDIO_PRESETS: StudioPreset[] = [
     config: (() => {
       const c = cloneConfig(DEFAULT_CONFIG);
       c.sim.seed = 'airwaves-01';
-      c.sim.densityConcentration = 0.84;
-      c.sim.guidingCurves = 10;
-      c.sim.curvature = 1.15;
-      c.sim.turbulence = 0.42;
-      c.sim.dispersion = 0.34;
-      c.sim.vortexStrength = 0.72;
+      c.sim.particleCount = 62000;
+      c.sim.densityConcentration = 0.88;
+      c.sim.guidingCurves = 14;
+      c.sim.curvature = 1.16;
+      c.sim.turbulence = 0.18;
+      c.sim.dispersion = 0.28;
+      c.sim.vortexStrength = 0.12;
       c.sim.safeZone = 'none';
       c.visual.paletteId = 'airwaves-champagne';
       c.visual.paletteStops = [...PALETTES['airwaves-champagne'].stops];
       c.visual.backgroundColor = PALETTES['airwaves-champagne'].background;
-      c.visual.guidingCurveOpacity = 0.72;
-      c.visual.trailFade = 0.74;
+      c.visual.particleSize = 0.80;
+      c.visual.particleBrightness = 1.16;
+      c.visual.guidingCurveOpacity = 0.62;
+      c.visual.trailFade = 0.64;
+      c.visual.glowIntensity = 0.36;
       c.typography.showText = false;
       c.typography.showLogo = false;
       return c;
@@ -200,18 +212,20 @@ export const STUDIO_PRESETS: StudioPreset[] = [
     config: (() => {
       const c = cloneConfig(DEFAULT_CONFIG);
       c.sim.seed = 'velvet-404';
-      c.sim.particleCount = 52000;
-      c.sim.densityConcentration = 0.56;
-      c.sim.dispersion = 0.68;
-      c.sim.turbulence = 0.85;
-      c.sim.guidingCurves = 5;
+      c.sim.particleCount = 64000;
+      c.sim.densityConcentration = 0.68;
+      c.sim.dispersion = 0.56;
+      c.sim.turbulence = 0.34;
+      c.sim.guidingCurves = 10;
       c.sim.safeZone = 'none';
       c.visual.paletteId = 'airwaves-rose';
       c.visual.paletteStops = [...PALETTES['airwaves-rose'].stops];
       c.visual.backgroundColor = PALETTES['airwaves-rose'].background;
+      c.visual.particleSize = 0.86;
+      c.visual.particleBrightness = 1.16;
       c.visual.dofStrength = 1.45;
-      c.visual.guidingCurveOpacity = 0.22;
-      c.visual.glowIntensity = 0.44;
+      c.visual.guidingCurveOpacity = 0.28;
+      c.visual.glowIntensity = 0.34;
       c.typography.showText = false;
       c.typography.showLogo = false;
       return c;
@@ -257,6 +271,45 @@ export const STUDIO_PRESETS: StudioPreset[] = [
       c.visual.paletteStops = [...PALETTES['aurora-emerald'].stops];
       c.visual.backgroundColor = PALETTES['aurora-emerald'].background;
       c.visual.guidingCurveOpacity = 0.52;
+      return c;
+    })(),
+  },
+  {
+    id: 'airflow-electric-prism',
+    name: 'Airflow RK2 Prism',
+    description: 'True 6-stage RK2 vector-field streamline advection with crossed cyan-magenta silk sheets',
+    config: (() => {
+      const c = cloneConfig(DEFAULT_CONFIG);
+      c.sim.seed = 'airflow-prism-26';
+      c.sim.particleCount = 54000;
+      c.sim.fieldMode = 'airflow-streamlines';
+      c.sim.composition = 'diagonal-flow';
+      c.sim.flowDirection = 'diagonal';
+      c.sim.flowAngle = -4;
+      c.sim.curvature = 1.08;
+      c.sim.turbulence = 0.22;
+      c.sim.dispersion = 0.32;
+      c.sim.densityConcentration = 0.86;
+      c.sim.vortexStrength = 0.18;
+      c.sim.guidingCurves = 12;
+      c.sim.trailLength = 0.46;
+      c.sim.safeZone = 'none';
+      c.sim.attractors = [
+        { id: 'att-1', x: 0.26, y: 0.08, strength: 0.28, radius: 0.65 },
+        { id: 'att-2', x: -0.36, y: -0.18, strength: -0.22, radius: 0.55 },
+      ];
+      c.visual.paletteId = 'airflow-prism';
+      c.visual.paletteStops = [...PALETTES['airflow-prism'].stops];
+      c.visual.backgroundColor = PALETTES['airflow-prism'].background;
+      c.visual.particleSize = 0.90;
+      c.visual.particleBrightness = 1.38;
+      c.visual.glowIntensity = 0.48;
+      c.visual.bloomThreshold = 0.48;
+      c.visual.dofStrength = 0.95;
+      c.visual.guidingCurveOpacity = 0.62;
+      c.visual.trailFade = 0.62;
+      c.typography.showText = false;
+      c.typography.showLogo = false;
       return c;
     })(),
   },

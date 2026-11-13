@@ -7,8 +7,10 @@ Every composition in Airwaves Studio is generated purely from deterministic math
 User-supplied seeds (arbitrary strings such as `IDEA-2026.3`) are hashed via 32-bit **FNV-1a** (`hashSeed`) into a `Mulberry32` PRNG state. To prevent parameter changes in one subsystem from scrambling unrelated random draws, `createPRNG` supports `fork(salt)`:
 
 - `rng.fork('noise')` builds the 512-entry noise permutation table.
+- `rng.fork('acoustic')` seeds twisted ribbon frequencies, pinch waist position, and carrier phases.
+- `rng.fork('vortices')` places localized Gaussian rotational eddies for `airflow-streamlines`.
 - `rng.fork('curves')` derives harmonic phases, frequencies, and ribbon offsets for each guiding curve.
-- `rng.fork('particles')` samples particle coordinates, depths, and size seeds.
+- `rng.fork('particles')` samples particle coordinates, depths, roles, and size seeds.
 
 Normal variates (`gaussian()`) are generated with the **Box-Muller transform** for smooth ribbon falloff and focal-depth spread.
 
@@ -25,24 +27,32 @@ Both basis functions feed:
   $$\mathbf{v}_{\text{curl}}(x, y) = \left( \frac{\partial \psi}{\partial y},\ -\frac{\partial \psi}{\partial x} \right)$$
   Because $\nabla \cdot \mathbf{v}_{\text{curl}} = 0$, particles swirl into organic eddies and braided ribbons without collapsing into unnatural sinks.
 
-## 3. Harmonic Guiding Curves & Caustic Ridges (`src/simulation/flowField.ts`)
+## 3. Acoustic Caustic Ribbon (`acoustic-caustic`) & Guiding Curves (`src/simulation/flowField.ts`)
 
-To create the signature braided airwave silhouette rather than uniform noise clouds:
+To create sculptural braided airwaves rather than dispersed star swarms:
 
-1. `FlowField` constructs $K$ (`guidingCurves`) harmonic filaments. Most curves cluster near the main ribbon (`spreadScale = 0.45`), while up to two outer curves (`isOuterArc`) sweep wider into negative space to create delicate echoing filaments.
-2. Each curve is evaluated along parameter $s \in [0, 1]$ using a carrier S-wave plus dual-frequency harmonics modulated by a pinching fan envelope (`fanEnvelope`), or an orbital spiral when `composition === 'radial-flow'`.
-3. Every curve vertex and particle coordinate passes through `warpPoint(x, y)`, displacing both coherently through the curl noise, global vortex rotation, and attractor/repeller fields so particles hug the deformed streamlines.
+1. **Twisted Parametric Sheet**: `evalAcousticRibbon(s, phi)` parameterizes a continuous 3D wave sheet across longitudinal flow $s \in [0, 1]$ and strand phase $\phi \in [0, 2\pi)$ modulated by a pinch-and-swell harmonic envelope (`entryPinch * nodePinch`).
+2. **Optical Fold Caustics**: Along fold crests ($\theta_1 \approx \pi / 2$, where $|\partial v / \partial \phi| \to 0$), neighboring strands bunch together naturally, creating bright caustic ridges (`causticBoost`), gauzy translucent pockets between crossings, and up to ~26% taller echoing outer filaments (`isOuterArc`).
+3. **Coherent Low-Frequency Bending**: Both guiding filaments (`220` segments per curve) and core particles share `warpPoint(x, y)` with smooth low-frequency curl noise (`0.48 * noiseScale`) so waves bend gracefully around attractors without tearing into noisy clumps.
+4. **Role-Partitioned Sampling**: `runSimulation()` balances primary caustic fold grains, discrete braided strand particles, continuous sheet fill, crisp focal-plane spray dust, beads riding outer arcs, and sparse (~1.5%) peripheral optical bokeh orbs.
 
-## 4. Particle Placement, Advection & Safe Zone (`src/simulation/particleSim.ts`)
+## 4. Six-Stage Airflow RK2 Streamline Simulation (`airflow-streamlines`)
 
-For each particle $i \in [0, N)$:
+For dynamic, crossed-sheet vector-field compositions (`Airflow RK2 Prism`):
 
-1. **Ribbon Mixture Sampling**: Particles are drawn either tightly along a guiding curve (`ridgeTightness`, forming bright caustic ridges), more broadly across the ribbon (`wideDispersion`), or as sparse ambient bokeh (`isAmbientBokeh`).
+1. **Composite Vector Field**: `sampleField(x, y)` sums base directional flow, dual-carrier harmonic waves, gentle caustic sheet convergence (`fvConverge`), 3 seeded `GaussianVortex` eddies, seeded 2D curl noise, user attractors/repellers, and typography safe-zone deflection.
+2. **Cached Eulerian Grid**: `ensureFieldGrid()` samples the vector field once onto a deterministic `200 × 120` bilinear grid (`sampleFieldCached`), keeping multi-step Runge-Kutta integration fast (~100 ms for 54k particles).
+3. **Multi-Step RK2 Particle Advection**: Particles spawn across three overlapping wave sheets and advect for 8–27 RK2 midpoint steps ($\Delta t = 0.024$) through `sampleFieldCached`, allowing luminous ridges and density gradients to emerge organically from streamline convergence.
+4. **Unit-Tangent Streamline Integration**: Guiding lines integrate `220` RK2 steps of $\frac{dP}{ds} = \frac{F(P)}{|F(P)|}$ (`integrateStreamline`) from seeded left-edge anchors through the exact same vector field driving the particles.
+5. **Cross-Sheet Color & Diffraction Glints**: Longitudinal coordinate $u$, cross-sheet index, and local velocity speed shift palette parameter $t$, while top-energy crest hotspots trigger 4-point optical diffraction glints.
+
+## 5. Legacy Fields, Particle Placement & Safe Zone (`src/simulation/particleSim.ts`)
+
+For `harmonic-ribbon`, `curl-noise`, `vortex-stream`, and `interference` modes:
+
+1. **Mixture Sampling**: Particles sample along `140`-step guiding curves (`ridgeTightness`), broad dispersion around filaments (`wideDispersion`), or ambient bokeh (`isAmbientBokeh`), followed by single-step RK2 advection and 3-segment motion trails.
 2. **Size Distributions**:
-   - `bimodal-bokeh`: ~4.5% large out-of-focus bokeh orbs, ~13.5% medium pearls, and ~82% crisp micro-sparks.
-   - `power-law`: Heavy-tailed Pareto-like distribution ($u^{4.2}$) dominated by fine dust with rare luminous orbs.
+   - `bimodal-bokeh`: crisp micro-sparks combined with medium pearls and out-of-focus bokeh orbs (restricted off the caustic spine in `acoustic-caustic` / `airflow-streamlines`).
+   - `power-law`: Heavy-tailed distribution dominated by fine dust with rare luminous orbs.
    - `fine-dust` / `uniform`: Tighter particle radii for architectural or misty textures.
-3. **RK2 Midpoint Advection & Trails**: Particles take a deterministic 2nd-order Runge-Kutta step along `sampleField(x, y)`, which combines the selected `fieldMode` (`harmonic-ribbon`, `curl-noise`, `vortex-stream`, `interference`), curl turbulence, vortex swirl, and all `AttractorNode` potentials:
-   - Each attractor/repeller applies Gaussian falloff $\exp(-d^2 / r^2)$ with radial pull/push (`strength * 0.72`) plus a subtle orbital twist (`strength * 0.32`).
-   - Up to `18,000` particles emit 3-segment backwards streamline trails (`trailPositions`) with tapering alpha.
-4. **Typography Safe Zone**: `safeZoneMask(x, y)` computes an elliptical smoothstep mask around the configured region (`top-left`, `bottom-left`, `top-right`, `center`), gently deflecting field vectors away from the title block and attenuating particle/curve energy inside the zone so typography remains legible.
+3. **Attractors & Typography Safe Zone**: Each attractor/repeller applies Gaussian falloff $\exp(-d^2 / r^2)$ with radial pull/push plus gentle orbital twist. `safeZoneMask(x, y)` computes an elliptical smoothstep mask around `top-left`, `bottom-left`, `top-right`, or `center` to keep title typography crisp and readable.

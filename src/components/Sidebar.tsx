@@ -339,6 +339,8 @@ export function Sidebar({
                 label="Vector Field Mode"
                 value={sim.fieldMode}
                 options={[
+                  { value: 'acoustic-caustic', label: 'Acoustic Caustic Ribbon' },
+                  { value: 'airflow-streamlines', label: 'Airflow RK2 Streamlines' },
                   { value: 'harmonic-ribbon', label: 'Harmonic Airwave Ribbon' },
                   { value: 'curl-noise', label: 'Incompressible Curl Field' },
                   { value: 'vortex-stream', label: 'Vortex Streamlines' },

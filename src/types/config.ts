@@ -1,6 +1,12 @@
 export type SizeDistribution = 'bimodal-bokeh' | 'power-law' | 'uniform' | 'fine-dust';
 export type FlowDirection = 'horizontal' | 'vertical' | 'diagonal' | 'radial';
-export type FieldMode = 'harmonic-ribbon' | 'curl-noise' | 'vortex-stream' | 'interference';
+export type FieldMode =
+  | 'acoustic-caustic'
+  | 'airflow-streamlines'
+  | 'harmonic-ribbon'
+  | 'curl-noise'
+  | 'vortex-stream'
+  | 'interference';
 export type NoiseType = 'simplex' | 'perlin';
 export type CompositionPreset =
   | 'central-wave'
@@ -60,6 +66,7 @@ export interface SimParams {
 export type PaletteId =
   | 'jetbrains-amber-blue'
   | 'jetbrains-magenta-blue'
+  | 'airflow-prism'
   | 'airwaves-champagne'
   | 'airwaves-rose'
   | 'monochrome'

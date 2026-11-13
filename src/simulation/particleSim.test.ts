@@ -73,12 +73,22 @@ describe('Deterministic Particle Airwave Simulation', () => {
   it('generates expected guiding curve and trail vertex counts', () => {
     const sim = runSimulation({
       ...DEFAULT_CONFIG.sim,
+      fieldMode: 'acoustic-caustic',
       particleCount: 2000,
       guidingCurves: 6,
       trailLength: 0.5,
     });
-    expect(sim.curveVertexCount).toBe(6 * 139 * 2);
+    expect(sim.curveVertexCount).toBe(6 * 219 * 2);
     expect(sim.trailVertexCount).toBe(2000 * 3 * 2);
+
+    const legacySim = runSimulation({
+      ...DEFAULT_CONFIG.sim,
+      fieldMode: 'harmonic-ribbon',
+      particleCount: 2000,
+      guidingCurves: 6,
+      trailLength: 0.5,
+    });
+    expect(legacySim.curveVertexCount).toBe(6 * 139 * 2);
 
     const noTrails = runSimulation({
       ...DEFAULT_CONFIG.sim,
@@ -86,5 +96,26 @@ describe('Deterministic Particle Airwave Simulation', () => {
       trailLength: 0,
     });
     expect(noTrails.trailVertexCount).toBe(0);
+  });
+
+  it('produces finite coherent coordinates across acoustic-caustic and airflow-streamlines compositions', () => {
+    for (const fieldMode of ['acoustic-caustic', 'airflow-streamlines'] as const) {
+      for (const composition of ['diagonal-flow', 'central-wave', 'radial-flow'] as const) {
+        const sim = runSimulation({
+          ...DEFAULT_CONFIG.sim,
+          fieldMode,
+          composition,
+          flowDirection: composition === 'radial-flow' ? 'radial' : 'diagonal',
+          particleCount: 2500,
+        });
+        expect(sim.curveVertexCount).toBe(DEFAULT_CONFIG.sim.guidingCurves * 219 * 2);
+        for (let i = 0; i < sim.positions.length; i++) {
+          expect(Number.isFinite(sim.positions[i])).toBe(true);
+        }
+        for (let i = 0; i < sim.curvePositions.length; i++) {
+          expect(Number.isFinite(sim.curvePositions[i])).toBe(true);
+        }
+      }
+    }
   });
 });
