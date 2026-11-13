@@ -60,12 +60,12 @@ export interface RibbonPoint {
   causticBoost: number;
 }
 
-const GRID_W = 200;
-const GRID_H = 120;
-const GRID_X_MIN = -1.85;
-const GRID_X_MAX = 1.85;
-const GRID_Y_MIN = -1.25;
-const GRID_Y_MAX = 1.25;
+export const FIELD_GRID_W = 200;
+export const FIELD_GRID_H = 120;
+export const FIELD_GRID_X_MIN = -1.85;
+export const FIELD_GRID_X_MAX = 1.85;
+export const FIELD_GRID_Y_MIN = -1.25;
+export const FIELD_GRID_Y_MAX = 1.25;
 
 export class FlowField {
   readonly params: SimParams;
@@ -360,13 +360,13 @@ export class FlowField {
    */
   ensureFieldGrid(): Float32Array {
     if (this.fieldGrid) return this.fieldGrid;
-    const grid = new Float32Array(GRID_W * GRID_H * 2);
-    for (let j = 0; j < GRID_H; j++) {
-      const y = GRID_Y_MIN + (j / (GRID_H - 1)) * (GRID_Y_MAX - GRID_Y_MIN);
-      for (let i = 0; i < GRID_W; i++) {
-        const x = GRID_X_MIN + (i / (GRID_W - 1)) * (GRID_X_MAX - GRID_X_MIN);
+    const grid = new Float32Array(FIELD_GRID_W * FIELD_GRID_H * 2);
+    for (let j = 0; j < FIELD_GRID_H; j++) {
+      const y = FIELD_GRID_Y_MIN + (j / (FIELD_GRID_H - 1)) * (FIELD_GRID_Y_MAX - FIELD_GRID_Y_MIN);
+      for (let i = 0; i < FIELD_GRID_W; i++) {
+        const x = FIELD_GRID_X_MIN + (i / (FIELD_GRID_W - 1)) * (FIELD_GRID_X_MAX - FIELD_GRID_X_MIN);
         const [vx, vy] = this.sampleField(x, y);
-        const idx = (j * GRID_W + i) * 2;
+        const idx = (j * FIELD_GRID_W + i) * 2;
         grid[idx] = vx;
         grid[idx + 1] = vy;
       }
@@ -380,16 +380,16 @@ export class FlowField {
    */
   sampleFieldCached(x: number, y: number): [number, number] {
     const grid = this.ensureFieldGrid();
-    const fx = ((x - GRID_X_MIN) / (GRID_X_MAX - GRID_X_MIN)) * (GRID_W - 1);
-    const fy = ((y - GRID_Y_MIN) / (GRID_Y_MAX - GRID_Y_MIN)) * (GRID_H - 1);
-    const ix = Math.max(0, Math.min(GRID_W - 2, Math.floor(fx)));
-    const iy = Math.max(0, Math.min(GRID_H - 2, Math.floor(fy)));
+    const fx = ((x - FIELD_GRID_X_MIN) / (FIELD_GRID_X_MAX - FIELD_GRID_X_MIN)) * (FIELD_GRID_W - 1);
+    const fy = ((y - FIELD_GRID_Y_MIN) / (FIELD_GRID_Y_MAX - FIELD_GRID_Y_MIN)) * (FIELD_GRID_H - 1);
+    const ix = Math.max(0, Math.min(FIELD_GRID_W - 2, Math.floor(fx)));
+    const iy = Math.max(0, Math.min(FIELD_GRID_H - 2, Math.floor(fy)));
     const tx = Math.max(0, Math.min(1, fx - ix));
     const ty = Math.max(0, Math.min(1, fy - iy));
 
-    const i00 = (iy * GRID_W + ix) * 2;
+    const i00 = (iy * FIELD_GRID_W + ix) * 2;
     const i10 = i00 + 2;
-    const i01 = i00 + GRID_W * 2;
+    const i01 = i00 + FIELD_GRID_W * 2;
     const i11 = i01 + 2;
 
     const vx0 = grid[i00] + (grid[i10] - grid[i00]) * tx;

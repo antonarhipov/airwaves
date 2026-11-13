@@ -48,9 +48,50 @@ export const BG_FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
+const GLSL_FLOW_ADVECTION = /* glsl */ `
+  uniform sampler2D uFieldTex;
+  uniform vec2 uFieldMin;
+  uniform vec2 uFieldMax;
+
+  float hash12f(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+
+  vec2 sampleFlowField(vec2 p) {
+    vec2 uv = clamp((p - uFieldMin) / (uFieldMax - uFieldMin), vec2(0.002), vec2(0.998));
+    return texture2D(uFieldTex, uv).rg;
+  }
+
+  vec2 advectParticleRK2(
+    vec2 origin,
+    float speedMult,
+    float timeSec,
+    out float lifeFade,
+    out vec2 flowDir
+  ) {
+    float phase = hash12f(origin * 17.31 + vec2(3.17, 7.41));
+    float age = fract(phase + timeSec * 0.28 * speedMult);
+    lifeFade = smoothstep(0.0, 0.16, age) * smoothstep(1.0, 0.80, age) * 1.18;
+
+    float tau = (age - 0.38) * 0.92 * speedMult;
+    float h = tau / 6.0;
+    vec2 p = origin;
+    for (int i = 0; i < 6; i++) {
+      vec2 k0 = sampleFlowField(p);
+      vec2 k1 = sampleFlowField(p + k0 * (h * 0.5));
+      p += k1 * h;
+    }
+    flowDir = normalize(sampleFlowField(p) + vec2(0.0001));
+    return p;
+  }
+`;
+
 export const LINE_VERTEX_SHADER = /* glsl */ `
   attribute vec2 aPosition;
   attribute vec2 aLineAttr; // x: tColor, y: alpha
+  attribute vec3 aAnchor;   // xy: parent particle origin, z: speedMult (>0 for particle trails, 0 for guiding curves)
 
   uniform float uAspect;
   uniform float uTime;
@@ -58,16 +99,31 @@ export const LINE_VERTEX_SHADER = /* glsl */ `
 
   varying float vT;
   varying float vAlpha;
+  varying float vIsTrail;
+
+  ${GLSL_FLOW_ADVECTION}
 
   void main() {
     vT = aLineAttr.x;
     vAlpha = aLineAttr.y;
+    vIsTrail = step(0.01, aAnchor.z);
 
     vec2 pos = aPosition;
     if (uAnimate > 0.5) {
-      float phase = uTime * 0.55;
-      pos.y += sin(pos.x * 2.4 + phase) * 0.012 * sin(vT * 3.14159);
-      pos.x += cos(pos.y * 2.1 - phase * 0.8) * 0.006 * sin(vT * 3.14159);
+      if (aAnchor.z > 0.01) {
+        float lifeFade = 1.0;
+        vec2 flowDir = vec2(1.0, 0.0);
+        vec2 advected = advectParticleRK2(aAnchor.xy, aAnchor.z, uTime, lifeFade, flowDir);
+        float trailDist = length(aPosition - aAnchor.xy);
+        pos = advected - flowDir * trailDist;
+        vAlpha *= lifeFade;
+        vT = clamp(vT + (advected.x - aAnchor.x) * 0.22, 0.0, 1.0);
+      } else {
+        float phase = uTime * 1.15;
+        float env = sin(clamp(vT, 0.0, 1.0) * 3.14159);
+        pos.y += sin(pos.x * 2.6 - phase) * 0.022 * env;
+        pos.x += cos(pos.y * 2.2 - phase * 0.7) * 0.010 * env;
+      }
     }
 
     gl_Position = vec4(pos.x / max(0.3, uAspect) * 1.25, pos.y * 1.15, 0.0, 1.0);
@@ -88,6 +144,7 @@ export const LINE_FRAGMENT_SHADER = /* glsl */ `
 
   varying float vT;
   varying float vAlpha;
+  varying float vIsTrail;
 
   vec3 samplePalette(float t) {
     float x = clamp(t, 0.0, 1.0) * 3.0;
@@ -101,7 +158,12 @@ export const LINE_FRAGMENT_SHADER = /* glsl */ `
     vec3 col = mix(baseCol, vec3(1.0, 0.98, 0.96), 0.18 * clamp(vAlpha, 0.0, 1.0));
     float pulse = 1.0;
     if (uAnimate > 0.5) {
-      pulse = 0.85 + 0.22 * sin(vT * 10.0 - uTime * 1.8);
+      if (vIsTrail < 0.5) {
+        // Travelling photonic pulses flowing downstream along fixed vector-field streamlines
+        pulse = 0.68 + 0.34 * sin(vT * 18.0 - uTime * 3.6) + 0.18 * sin(vT * 31.0 - uTime * 5.8);
+      } else {
+        pulse = 1.05;
+      }
     }
     float alpha = vAlpha * uOpacity * 0.54 * pulse;
     if (alpha < 0.002) discard;
@@ -127,6 +189,9 @@ export const PARTICLE_VERTEX_SHADER = /* glsl */ `
   varying float vEnergy;
   varying float vCoc;
   varying float vBokeh;
+  varying float vLifeFade;
+
+  ${GLSL_FLOW_ADVECTION}
 
   // Compact 2D Simplex-like organic drift in GLSL
   vec2 hash22(vec2 p) {
@@ -152,16 +217,26 @@ export const PARTICLE_VERTEX_SHADER = /* glsl */ `
     vT = aAttr.x;
     vEnergy = aAttr.z;
     vBokeh = aAttr.w;
+    vLifeFade = 1.0;
 
-    vec2 center = aOffset.xy;
+    vec2 origin = aOffset.xy;
+    vec2 center = origin;
     float z = aOffset.z;
+    vec2 flowDir = aVelocity;
 
     if (uAnimate > 0.5) {
-      float t = uTime * 0.45;
-      float n1 = gradNoise(center * 2.1 + vec2(t * 0.35, -t * 0.25));
-      float n2 = gradNoise(center * 2.1 + vec2(-t * 0.25 + 5.2, t * 0.3));
-      float driftAmp = 0.016 * (0.45 + abs(z) * 0.55);
-      center += aVelocity * sin(t + vT * 6.283) * 0.010 + vec2(n1, n2) * driftAmp;
+      float speedMult = 1.0 - min(0.62, vBokeh * 0.52);
+      float lifeFade = 1.0;
+      center = advectParticleRK2(origin, speedMult, uTime, lifeFade, flowDir);
+
+      // Subtle organic curl breath stacked cleanly atop directional RK2 flow
+      float t = uTime * 0.65;
+      float n1 = gradNoise(center * 2.2 + vec2(t * 0.45, -t * 0.30));
+      float n2 = gradNoise(center * 2.2 + vec2(-t * 0.30 + 5.2, t * 0.38));
+      center += vec2(n1, n2) * (0.012 * (0.5 + abs(z) * 0.5));
+
+      vLifeFade = lifeFade;
+      vT = clamp(vT + (center.x - origin.x) * 0.22, 0.0, 1.0);
     }
 
     // Circle of Confusion for Depth of Field bokeh
@@ -178,8 +253,8 @@ export const PARTICLE_VERTEX_SHADER = /* glsl */ `
 
     // Subtle velocity stretch for sharp in-focus sparks, round for bokeh
     float isGlint = step(1.42, vEnergy);
-    float stretch = mix(1.0 + max(0.0, 1.0 - coc * 1.5) * 0.45 * vEnergy, 1.0, isGlint);
-    vec2 dir = normalize(aVelocity + vec2(0.0001));
+    float stretch = mix(1.0 + max(0.0, 1.0 - coc * 1.5) * 0.55 * vEnergy, 1.0, isGlint);
+    vec2 dir = normalize(flowDir + vec2(0.0001));
     vec2 perp = vec2(-dir.y, dir.x);
     vec2 localQuad = dir * (position.x * stretch) + perp * position.y;
 
@@ -206,6 +281,7 @@ export const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
   varying float vEnergy;
   varying float vCoc;
   varying float vBokeh;
+  varying float vLifeFade;
 
   vec3 samplePalette(float t) {
     float x = clamp(t, 0.0, 1.0) * 3.0;
@@ -233,7 +309,7 @@ export const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
 
     // Balanced DoF attenuation so sparse bokeh circles stay luminous & colorful without smoking out sky
     float areaDamp = 1.0 / (1.0 + vCoc * vCoc * 2.25);
-    float intensity = profile * areaDamp * (0.28 + 1.18 * vEnergy) * uDensityNorm;
+    float intensity = profile * areaDamp * (0.28 + 1.18 * vEnergy) * uDensityNorm * vLifeFade;
 
     vec3 baseCol = samplePalette(vT);
     // Crisp specular pinpoint highlight preserving rich palette saturation along spine

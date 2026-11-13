@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CONFIG } from '../types/presets';
+import { DEFAULT_CONFIG, STUDIO_PRESETS } from '../types/presets';
+import { DEFAULT_LANDSCAPE_PARAMS, evaluateLandscapePoint } from './landscapeSim';
 import { runSimulation } from './particleSim';
 
 describe('Deterministic Particle Airwave Simulation', () => {
@@ -117,5 +118,42 @@ describe('Deterministic Particle Airwave Simulation', () => {
         }
       }
     }
+  });
+
+  it('implements closed-form Halton + Murmur3 3D Landscape evaluation with deterministic scrubbability', () => {
+    const preset = STUDIO_PRESETS.find((p) => p.id === 'landscape-champagne-wave');
+    expect(preset).toBeDefined();
+
+    const params = {
+      ...preset!.config.sim,
+      particleCount: 3000,
+      guidingCurves: 18,
+    };
+    const simA = runSimulation(params);
+    const simB = runSimulation(params);
+
+    expect(simA.landscape).toBeDefined();
+    expect(simA.positions).toEqual(simB.positions);
+    expect(simA.landscape!.particleDomain).toEqual(simB.landscape!.particleDomain);
+    expect(simA.curveVertexCount).toBe(18 * 159 * 2);
+
+    // Ridge vs dust stratification matches rho_ridge = 0.70 within Monte Carlo tolerance
+    let ridgeCount = 0;
+    for (let i = 0; i < simA.particleCount; i++) {
+      if (simA.landscape!.particleDomain[i * 4 + 3] > 0.5) ridgeCount++;
+    }
+    const ridgeFrac = ridgeCount / simA.particleCount;
+    expect(ridgeFrac).toBeGreaterThan(0.66);
+    expect(ridgeFrac).toBeLessThan(0.74);
+
+    // Closed-form temporal scrubbability: same inputs at t=0, t=2.5, t=0 produce identical results
+    const ptT0 = evaluateLandscapePoint(0.42, 0.08, 0, 1.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026);
+    const ptT2 = evaluateLandscapePoint(0.42, 0.08, 2.5, 1.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026);
+    const ptT0Again = evaluateLandscapePoint(0.42, 0.08, 0, 1.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026);
+
+    expect(ptT0).toEqual(ptT0Again);
+    expect(ptT2.yWorld).not.toBe(ptT0.yWorld);
+    expect(Number.isFinite(ptT2.xNdc)).toBe(true);
+    expect(Number.isFinite(ptT2.yNdc)).toBe(true);
   });
 });

@@ -1,3 +1,4 @@
+import { DEFAULT_LANDSCAPE_PARAMS } from '../simulation/landscapeSim';
 import type { AspectRatioId, PaletteDefinition, PaletteId, SplashConfig, StudioPreset } from './config';
 
 export const PALETTES: Record<Exclude<PaletteId, 'custom'>, PaletteDefinition> = {
@@ -18,6 +19,18 @@ export const PALETTES: Record<Exclude<PaletteId, 'custom'>, PaletteDefinition> =
     name: 'Airflow Cyan ↔ Magenta',
     stops: ['#ff1e8a', '#9d4edd', '#3b82f6', '#00e5ff'],
     background: '#030612',
+  },
+  'landscape-champagne': {
+    id: 'landscape-champagne',
+    name: 'Landscape Champagne → Ice',
+    stops: ['#F5C284', '#E6D5C3', '#AFC6E2', '#7FA8D6'],
+    background: '#040811',
+  },
+  'landscape-neon': {
+    id: 'landscape-neon',
+    name: 'Landscape Crimson → Azure',
+    stops: ['#FD3D30', '#E84878', '#8B3DFF', '#0096FF'],
+    background: '#040610',
   },
   'airwaves-champagne': {
     id: 'airwaves-champagne',
@@ -110,7 +123,7 @@ export const DEFAULT_CONFIG: SplashConfig = {
     trailFade: 0.48,
     guidingCurveOpacity: 0.44,
     animateFlow: true,
-    animationSpeed: 0.36,
+    animationSpeed: 0.55,
   },
   typography: {
     showText: true,
@@ -141,6 +154,7 @@ function cloneConfig(base: SplashConfig): SplashConfig {
     sim: {
       ...base.sim,
       attractors: base.sim.attractors.map((a) => ({ ...a })),
+      landscape: base.sim.landscape ? { ...base.sim.landscape } : undefined,
     },
     visual: {
       ...base.visual,
@@ -308,6 +322,79 @@ export const STUDIO_PRESETS: StudioPreset[] = [
       c.visual.dofStrength = 0.95;
       c.visual.guidingCurveOpacity = 0.62;
       c.visual.trailFade = 0.62;
+      c.visual.animationSpeed = 0.85;
+      c.typography.showText = false;
+      c.typography.showLogo = false;
+      return c;
+    })(),
+  },
+  {
+    id: 'landscape-champagne-wave',
+    name: '3D Landscape Champagne',
+    description: 'Closed-form Halton + 3D Curl manifold with optical CoC bokeh & core incandescence',
+    config: (() => {
+      const c = cloneConfig(DEFAULT_CONFIG);
+      c.sim.seed = '42026';
+      c.sim.particleCount = 120000;
+      c.sim.fieldMode = 'landscape-wave';
+      c.sim.composition = 'diagonal-flow';
+      c.sim.curvature = 1.05;
+      c.sim.dispersion = 0.38;
+      c.sim.densityConcentration = 0.85;
+      c.sim.guidingCurves = 18;
+      c.sim.safeZone = 'none';
+      c.sim.landscape = { ...DEFAULT_LANDSCAPE_PARAMS };
+      c.visual.paletteId = 'landscape-champagne';
+      c.visual.paletteStops = [...PALETTES['landscape-champagne'].stops];
+      c.visual.backgroundColor = PALETTES['landscape-champagne'].background;
+      c.visual.particleSize = 0.96;
+      c.visual.particleBrightness = 1.24;
+      c.visual.transparency = 0.92;
+      c.visual.glowIntensity = 0.42;
+      c.visual.bloomThreshold = 0.56;
+      c.visual.dofStrength = 1.0;
+      c.visual.focalPlane = 0.0;
+      c.visual.guidingCurveOpacity = 0.58;
+      c.visual.animationSpeed = 0.80;
+      c.typography.showText = false;
+      c.typography.showLogo = false;
+      return c;
+    })(),
+  },
+  {
+    id: 'landscape-neon-wave',
+    name: '3D Landscape Neon',
+    description: 'High-contrast crimson-to-azure 3D terrain relief with turbulent laminar filaments',
+    config: (() => {
+      const c = cloneConfig(DEFAULT_CONFIG);
+      c.sim.seed = '90210';
+      c.sim.particleCount = 120000;
+      c.sim.fieldMode = 'landscape-wave';
+      c.sim.composition = 'diagonal-flow';
+      c.sim.curvature = 1.18;
+      c.sim.dispersion = 0.44;
+      c.sim.densityConcentration = 0.82;
+      c.sim.guidingCurves = 18;
+      c.sim.safeZone = 'none';
+      c.sim.landscape = {
+        ...DEFAULT_LANDSCAPE_PARAMS,
+        planeSlopeAlpha: 0.24,
+        terrainRoughness: 0.52,
+        curlOuterStrength: 1.28,
+        coreIncandescence: 0.82,
+      };
+      c.visual.paletteId = 'landscape-neon';
+      c.visual.paletteStops = [...PALETTES['landscape-neon'].stops];
+      c.visual.backgroundColor = PALETTES['landscape-neon'].background;
+      c.visual.particleSize = 0.98;
+      c.visual.particleBrightness = 1.28;
+      c.visual.transparency = 0.93;
+      c.visual.glowIntensity = 0.44;
+      c.visual.bloomThreshold = 0.54;
+      c.visual.dofStrength = 1.05;
+      c.visual.focalPlane = 0.0;
+      c.visual.guidingCurveOpacity = 0.62;
+      c.visual.animationSpeed = 0.85;
       c.typography.showText = false;
       c.typography.showLogo = false;
       return c;

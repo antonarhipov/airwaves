@@ -3,8 +3,20 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import {
+  FIELD_GRID_X_MAX,
+  FIELD_GRID_X_MIN,
+  FIELD_GRID_Y_MAX,
+  FIELD_GRID_Y_MIN,
+} from '../simulation/flowField';
 import type { SimulationData } from '../simulation/particleSim';
 import type { VisualParams } from '../types/config';
+import {
+  LANDSCAPE_LINE_FRAGMENT_SHADER,
+  LANDSCAPE_LINE_VERTEX_SHADER,
+  LANDSCAPE_PARTICLE_FRAGMENT_SHADER,
+  LANDSCAPE_PARTICLE_VERTEX_SHADER,
+} from './landscapeShaders';
 import {
   BG_FRAGMENT_SHADER,
   BG_VERTEX_SHADER,
@@ -43,6 +55,7 @@ export class SplashRenderer {
   private curveLines: THREE.LineSegments | null = null;
   private trailLines: THREE.LineSegments | null = null;
   private particleMesh: THREE.Mesh | null = null;
+  private fieldTexture: THREE.DataTexture | null = null;
 
   private width = 1280;
   private height = 720;
@@ -91,17 +104,43 @@ export class SplashRenderer {
       uColor3: { value: new THREE.Vector3(0.12, 0.42, 1.0) },
     });
 
+    const sharedFieldUniforms = () => ({
+      uFieldTex: { value: null },
+      uFieldMin: { value: new THREE.Vector2(FIELD_GRID_X_MIN, FIELD_GRID_Y_MIN) },
+      uFieldMax: { value: new THREE.Vector2(FIELD_GRID_X_MAX, FIELD_GRID_Y_MAX) },
+    });
+
+    const sharedLandscapeUniforms = () => ({
+      uSeed: { value: 42026 },
+      uCurvature: { value: 1.0 },
+      uDispersion: { value: 0.35 },
+      uWorldDim: { value: new THREE.Vector2(18.0, 7.0) },
+      uPlaneSlope: { value: new THREE.Vector2(0.28, 0.14) },
+      uTerrainRough: { value: 0.42 },
+      uCurlScale: { value: 2.8 },
+      uCurlStrength: { value: new THREE.Vector3(0.25, 1.15, 0.28) },
+      uFocalDepth: { value: 12.5 },
+      uApertureScale: { value: 3.8 },
+      uBokehDecay: { value: 1.65 },
+      uCoreIncandescence: { value: 0.75 },
+    });
+
     this.curveUniforms = {
       ...sharedPaletteUniforms(),
+      ...sharedFieldUniforms(),
+      ...sharedLandscapeUniforms(),
       uAspect: { value: 16 / 9 },
       uTime: { value: 0 },
       uAnimate: { value: 1 },
+      uDofStrength: { value: 1.0 },
+      uFocalPlane: { value: 0.05 },
       uOpacity: { value: 0.44 },
       uBrightness: { value: 1.1 },
     };
 
     this.trailUniforms = {
       ...sharedPaletteUniforms(),
+      ...sharedFieldUniforms(),
       uAspect: { value: 16 / 9 },
       uTime: { value: 0 },
       uAnimate: { value: 1 },
@@ -111,6 +150,8 @@ export class SplashRenderer {
 
     this.particleUniforms = {
       ...sharedPaletteUniforms(),
+      ...sharedFieldUniforms(),
+      ...sharedLandscapeUniforms(),
       uAspect: { value: 16 / 9 },
       uResolution: { value: new THREE.Vector2(1280, 720) },
       uTime: { value: 0 },
@@ -138,29 +179,98 @@ export class SplashRenderer {
    * Upload newly computed SimulationData buffers to the GPU.
    */
   setSimulationData(sim: SimulationData): void {
+    // 0. Upload 2D vector field grid as a half-float DataTexture for GPU streamline advection
+    if (this.fieldTexture) {
+      this.fieldTexture.dispose();
+      this.fieldTexture = null;
+    }
+    const texCount = sim.fieldGridWidth * sim.fieldGridHeight;
+    const halfData = new Uint16Array(texCount * 4);
+    for (let i = 0; i < texCount; i++) {
+      halfData[i * 4] = THREE.DataUtils.toHalfFloat(sim.fieldGrid[i * 2]);
+      halfData[i * 4 + 1] = THREE.DataUtils.toHalfFloat(sim.fieldGrid[i * 2 + 1]);
+      halfData[i * 4 + 2] = 0;
+      halfData[i * 4 + 3] = 15360; // 1.0 in IEEE 754 half-float
+    }
+    this.fieldTexture = new THREE.DataTexture(
+      halfData,
+      sim.fieldGridWidth,
+      sim.fieldGridHeight,
+      THREE.RGBAFormat,
+      THREE.HalfFloatType,
+    );
+    this.fieldTexture.minFilter = THREE.LinearFilter;
+    this.fieldTexture.magFilter = THREE.LinearFilter;
+    this.fieldTexture.wrapS = THREE.ClampToEdgeWrapping;
+    this.fieldTexture.wrapT = THREE.ClampToEdgeWrapping;
+    this.fieldTexture.needsUpdate = true;
+
+    this.curveUniforms.uFieldTex.value = this.fieldTexture;
+    this.trailUniforms.uFieldTex.value = this.fieldTexture;
+    this.particleUniforms.uFieldTex.value = this.fieldTexture;
+
+    const landscape = sim.landscape;
+    if (landscape) {
+      const lp = landscape.params;
+      const syncLandscape = (u: Record<string, THREE.IUniform>) => {
+        u.uSeed.value = landscape.seedU32;
+        u.uCurvature.value = landscape.curvature;
+        u.uDispersion.value = landscape.dispersion;
+        u.uWorldDim.value.set(lp.worldWidth, lp.worldDepth);
+        u.uPlaneSlope.value.set(lp.planeSlopeAlpha, lp.planeTiltBeta);
+        u.uTerrainRough.value = lp.terrainRoughness;
+        u.uCurlScale.value = lp.curlScale;
+        u.uCurlStrength.value.set(lp.curlCoreStrength, lp.curlOuterStrength, 0.28);
+        u.uFocalDepth.value = lp.focalDepth;
+        u.uApertureScale.value = lp.apertureScale;
+        u.uBokehDecay.value = lp.bokehDecay;
+        u.uCoreIncandescence.value = lp.coreIncandescence;
+      };
+      syncLandscape(this.curveUniforms);
+      syncLandscape(this.particleUniforms);
+    }
+
     // 1. Guiding airwave curves
     if (this.curveLines) {
       this.scene.remove(this.curveLines);
       this.curveLines.geometry.dispose();
       (this.curveLines.material as THREE.Material).dispose();
+      this.curveLines = null;
     }
     if (sim.curveVertexCount > 0) {
       const curveGeo = new THREE.BufferGeometry();
       // Dummy 3D position attribute required by Three.js bounding/draw count
       const dummyPos = new Float32Array(sim.curveVertexCount * 3);
       curveGeo.setAttribute('position', new THREE.BufferAttribute(dummyPos, 3));
-      curveGeo.setAttribute('aPosition', new THREE.BufferAttribute(sim.curvePositions, 2));
-      curveGeo.setAttribute('aLineAttr', new THREE.BufferAttribute(sim.curveAttributes, 2));
 
-      const curveMat = new THREE.ShaderMaterial({
-        vertexShader: LINE_VERTEX_SHADER,
-        fragmentShader: LINE_FRAGMENT_SHADER,
-        uniforms: this.curveUniforms,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthTest: false,
-        depthWrite: false,
-      });
+      let curveMat: THREE.ShaderMaterial;
+      if (landscape) {
+        curveGeo.setAttribute('aLineDomain', new THREE.BufferAttribute(landscape.curveDomain, 2));
+        curveMat = new THREE.ShaderMaterial({
+          vertexShader: LANDSCAPE_LINE_VERTEX_SHADER,
+          fragmentShader: LANDSCAPE_LINE_FRAGMENT_SHADER,
+          glslVersion: THREE.GLSL3,
+          uniforms: this.curveUniforms,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+      } else {
+        const dummyAnchors = new Float32Array(sim.curveVertexCount * 3);
+        curveGeo.setAttribute('aPosition', new THREE.BufferAttribute(sim.curvePositions, 2));
+        curveGeo.setAttribute('aLineAttr', new THREE.BufferAttribute(sim.curveAttributes, 2));
+        curveGeo.setAttribute('aAnchor', new THREE.BufferAttribute(dummyAnchors, 3));
+        curveMat = new THREE.ShaderMaterial({
+          vertexShader: LINE_VERTEX_SHADER,
+          fragmentShader: LINE_FRAGMENT_SHADER,
+          uniforms: this.curveUniforms,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+      }
       this.curveLines = new THREE.LineSegments(curveGeo, curveMat);
       this.curveLines.frustumCulled = false;
       this.curveLines.renderOrder = 1;
@@ -180,6 +290,7 @@ export class SplashRenderer {
       trailGeo.setAttribute('position', new THREE.BufferAttribute(dummyPos, 3));
       trailGeo.setAttribute('aPosition', new THREE.BufferAttribute(sim.trailPositions, 2));
       trailGeo.setAttribute('aLineAttr', new THREE.BufferAttribute(sim.trailAttributes, 2));
+      trailGeo.setAttribute('aAnchor', new THREE.BufferAttribute(sim.trailAnchors, 3));
 
       const trailMat = new THREE.ShaderMaterial({
         vertexShader: LINE_VERTEX_SHADER,
@@ -209,19 +320,34 @@ export class SplashRenderer {
     instGeo.attributes.position = baseQuad.attributes.position;
     instGeo.instanceCount = sim.particleCount;
 
-    instGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(sim.positions, 3));
-    instGeo.setAttribute('aVelocity', new THREE.InstancedBufferAttribute(sim.velocities, 2));
-    instGeo.setAttribute('aAttr', new THREE.InstancedBufferAttribute(sim.attributes, 4));
+    let particleMat: THREE.ShaderMaterial;
+    if (landscape) {
+      instGeo.setAttribute('aDomain', new THREE.InstancedBufferAttribute(landscape.particleDomain, 4));
+      particleMat = new THREE.ShaderMaterial({
+        vertexShader: LANDSCAPE_PARTICLE_VERTEX_SHADER,
+        fragmentShader: LANDSCAPE_PARTICLE_FRAGMENT_SHADER,
+        glslVersion: THREE.GLSL3,
+        uniforms: this.particleUniforms,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      });
+    } else {
+      instGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(sim.positions, 3));
+      instGeo.setAttribute('aVelocity', new THREE.InstancedBufferAttribute(sim.velocities, 2));
+      instGeo.setAttribute('aAttr', new THREE.InstancedBufferAttribute(sim.attributes, 4));
 
-    const particleMat = new THREE.ShaderMaterial({
-      vertexShader: PARTICLE_VERTEX_SHADER,
-      fragmentShader: PARTICLE_FRAGMENT_SHADER,
-      uniforms: this.particleUniforms,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false,
-    });
+      particleMat = new THREE.ShaderMaterial({
+        vertexShader: PARTICLE_VERTEX_SHADER,
+        fragmentShader: PARTICLE_FRAGMENT_SHADER,
+        uniforms: this.particleUniforms,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      });
+    }
 
     this.particleMesh = new THREE.Mesh(instGeo, particleMat);
     this.particleMesh.frustumCulled = false;
@@ -262,6 +388,8 @@ export class SplashRenderer {
     this.curveUniforms.uOpacity.value = visual.guidingCurveOpacity;
     this.curveUniforms.uBrightness.value = visual.particleBrightness;
     this.curveUniforms.uAnimate.value = visual.animateFlow ? 1 : 0;
+    this.curveUniforms.uDofStrength.value = visual.dofStrength;
+    this.curveUniforms.uFocalPlane.value = visual.focalPlane;
 
     applyPalette(this.trailUniforms);
     this.trailUniforms.uOpacity.value = visual.trailFade * 0.65;
@@ -347,6 +475,9 @@ export class SplashRenderer {
     if (this.particleMesh) {
       this.particleMesh.geometry.dispose();
       (this.particleMesh.material as THREE.Material).dispose();
+    }
+    if (this.fieldTexture) {
+      this.fieldTexture.dispose();
     }
     this.bgMesh.geometry.dispose();
     (this.bgMesh.material as THREE.Material).dispose();

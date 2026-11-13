@@ -1,6 +1,7 @@
 import { createPRNG } from '../math/prng';
 import type { SimParams } from '../types/config';
-import { FlowField } from './flowField';
+import { FIELD_GRID_H, FIELD_GRID_W, FlowField } from './flowField';
+import { generateLandscapeSimulation, type LandscapeMetadata } from './landscapeSim';
 
 export interface SimulationData {
   particleCount: number;
@@ -12,6 +13,8 @@ export interface SimulationData {
   attributes: Float32Array;
   /** Line-segment pairs for particle trails: [x0, y0, x1, y1, ...] */
   trailPositions: Float32Array;
+  /** Per-vertex parent particle anchor for lockstep GPU flow advection: [ax, ay, speedMult, ...] */
+  trailAnchors: Float32Array;
   /** Per-vertex trail attributes: [tColor, alpha] */
   trailAttributes: Float32Array;
   trailVertexCount: number;
@@ -20,6 +23,12 @@ export interface SimulationData {
   /** Per-vertex curve attributes: [tColor, alpha] */
   curveAttributes: Float32Array;
   curveVertexCount: number;
+  /** Precomputed 2D vector field grid (vx, vy pairs) for real-time GPU RK2 advection */
+  fieldGrid: Float32Array;
+  fieldGridWidth: number;
+  fieldGridHeight: number;
+  /** Present when fieldMode === 'landscape-wave' for closed-form GPU GLSL3 evaluation */
+  landscape?: LandscapeMetadata;
   computeTimeMs: number;
 }
 
@@ -28,6 +37,9 @@ export interface SimulationData {
  * Completely independent of rendering colors, bloom, or typography.
  */
 export function runSimulation(params: SimParams): SimulationData {
+  if (params.fieldMode === 'landscape-wave') {
+    return generateLandscapeSimulation(params);
+  }
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const rng = createPRNG(params.seed);
   const field = new FlowField(params, rng);
@@ -42,7 +54,11 @@ export function runSimulation(params: SimParams): SimulationData {
   const trailSegsPerParticle = 3;
   const trailVertexCount = trailParticles * trailSegsPerParticle * 2;
   const trailPositions = new Float32Array(trailVertexCount * 2);
+  const trailAnchors = new Float32Array(trailVertexCount * 3);
   const trailAttributes = new Float32Array(trailVertexCount * 2);
+
+  // Precompute vector field grid once so GPU animation advects along the exact F(x, y) field
+  const fieldGrid = field.ensureFieldGrid();
 
   const curveCount = field.curves.length;
   const pRng = rng.fork('particles');
@@ -429,6 +445,7 @@ export function runSimulation(params: SimParams): SimulationData {
     if (i < trailParticles) {
       let tx = x;
       let ty = y;
+      const trailSpeedMult = 1.0 - Math.min(0.62, bokehFactor * 0.52);
       const stepLen =
         params.trailLength *
         (isAcousticMode ? 0.014 : isAirflowMode ? 0.019 : 0.026) *
@@ -445,12 +462,18 @@ export function runSimulation(params: SimParams): SimulationData {
 
         trailPositions[trailVertPtr * 2] = tx;
         trailPositions[trailVertPtr * 2 + 1] = ty;
+        trailAnchors[trailVertPtr * 3] = x;
+        trailAnchors[trailVertPtr * 3 + 1] = y;
+        trailAnchors[trailVertPtr * 3 + 2] = trailSpeedMult;
         trailAttributes[trailVertPtr * 2] = tColor;
         trailAttributes[trailVertPtr * 2 + 1] = alpha0;
         trailVertPtr++;
 
         trailPositions[trailVertPtr * 2] = nxPos;
         trailPositions[trailVertPtr * 2 + 1] = nyPos;
+        trailAnchors[trailVertPtr * 3] = x;
+        trailAnchors[trailVertPtr * 3 + 1] = y;
+        trailAnchors[trailVertPtr * 3 + 2] = trailSpeedMult;
         trailAttributes[trailVertPtr * 2] = tColor;
         trailAttributes[trailVertPtr * 2 + 1] = alpha1;
         trailVertPtr++;
@@ -526,11 +549,15 @@ export function runSimulation(params: SimParams): SimulationData {
     velocities,
     attributes,
     trailPositions,
+    trailAnchors,
     trailAttributes,
     trailVertexCount,
     curvePositions,
     curveAttributes,
     curveVertexCount,
+    fieldGrid,
+    fieldGridWidth: FIELD_GRID_W,
+    fieldGridHeight: FIELD_GRID_H,
     computeTimeMs: Math.round((t1 - t0) * 10) / 10,
   };
 }

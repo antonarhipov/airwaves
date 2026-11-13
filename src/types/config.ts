@@ -3,10 +3,42 @@ export type FlowDirection = 'horizontal' | 'vertical' | 'diagonal' | 'radial';
 export type FieldMode =
   | 'acoustic-caustic'
   | 'airflow-streamlines'
+  | 'landscape-wave'
   | 'harmonic-ribbon'
   | 'curl-noise'
   | 'vortex-stream'
   | 'interference';
+
+export interface LandscapeParams {
+  /** Fraction of particles clustered onto ridge contours (rho_ridge) */
+  ridgeRatio: number;
+  /** Power exponent controlling cross-sectional ridge tightness (p) */
+  ridgeSharpness: number;
+  /** Spatial width of base wave manifold (W) */
+  worldWidth: number;
+  /** Spatial depth of base wave manifold (D) */
+  worldDepth: number;
+  /** Longitudinal plane inclination (alpha) */
+  planeSlopeAlpha: number;
+  /** Lateral plane tilt (beta) */
+  planeTiltBeta: number;
+  /** Spatial wavelength of 3D curl noise eddies (L_curl) */
+  curlScale: number;
+  /** Core curl turbulence amplitude (gamma_0) */
+  curlCoreStrength: number;
+  /** Outer curl dispersion amplitude (gamma_1) */
+  curlOuterStrength: number;
+  /** Terrain fBm relief roughness weight (H_terrain) */
+  terrainRoughness: number;
+  /** Camera-space focal depth plane (z_focus) */
+  focalDepth: number;
+  /** Aperture CoC growth rate (k_aperture) */
+  apertureScale: number;
+  /** Out-of-focus bokeh attenuation exponent (eta) */
+  bokehDecay: number;
+  /** White-hot ridge core incandescence blend factor (mu_core) */
+  coreIncandescence: number;
+}
 export type NoiseType = 'simplex' | 'perlin';
 export type CompositionPreset =
   | 'central-wave'
@@ -61,12 +93,17 @@ export interface SimParams {
   safeZone: SafeZonePreset;
   safeZoneStrength: number;
   safeZoneRadius: number;
+
+  // Optional 3D Closed-Form Landscape specification parameters
+  landscape?: LandscapeParams;
 }
 
 export type PaletteId =
   | 'jetbrains-amber-blue'
   | 'jetbrains-magenta-blue'
   | 'airflow-prism'
+  | 'landscape-champagne'
+  | 'landscape-neon'
   | 'airwaves-champagne'
   | 'airwaves-rose'
   | 'monochrome'

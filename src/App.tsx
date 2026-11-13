@@ -108,6 +108,7 @@ export function App() {
     const fieldModes: FieldMode[] = [
       'acoustic-caustic',
       'airflow-streamlines',
+      'landscape-wave',
       'harmonic-ribbon',
       'curl-noise',
       'vortex-stream',

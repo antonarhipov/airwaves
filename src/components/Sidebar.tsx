@@ -8,10 +8,12 @@ import {
   Trash2,
   Type,
 } from 'lucide-react';
+import { DEFAULT_LANDSCAPE_PARAMS } from '../simulation/landscapeSim';
 import type {
   AspectRatioId,
   AttractorNode,
   CanvasParams,
+  LandscapeParams,
   PaletteId,
   SimParams,
   SplashConfig,
@@ -236,7 +238,7 @@ export function Sidebar({
                 label="Particle Count"
                 value={sim.particleCount}
                 min={5000}
-                max={100000}
+                max={120000}
                 step={1000}
                 formatValue={(v) => `${(v / 1000).toFixed(0)}k`}
                 onChange={(particleCount) => onUpdateSim({ particleCount })}
@@ -341,6 +343,7 @@ export function Sidebar({
                 options={[
                   { value: 'acoustic-caustic', label: 'Acoustic Caustic Ribbon' },
                   { value: 'airflow-streamlines', label: 'Airflow RK2 Streamlines' },
+                  { value: 'landscape-wave', label: '3D Landscape Wave (Closed-Form)' },
                   { value: 'harmonic-ribbon', label: 'Harmonic Airwave Ribbon' },
                   { value: 'curl-noise', label: 'Incompressible Curl Field' },
                   { value: 'vortex-stream', label: 'Vortex Streamlines' },
@@ -361,7 +364,7 @@ export function Sidebar({
                 label="Guiding Curves"
                 value={sim.guidingCurves}
                 min={1}
-                max={14}
+                max={24}
                 step={1}
                 formatValue={(v) => `${v} curves`}
                 onChange={(guidingCurves) => onUpdateSim({ guidingCurves })}
@@ -402,6 +405,80 @@ export function Sidebar({
                 onChange={(vortexStrength) => onUpdateSim({ vortexStrength })}
               />
             </section>
+
+            {sim.fieldMode === 'landscape-wave' && (() => {
+              const lp = { ...DEFAULT_LANDSCAPE_PARAMS, ...(sim.landscape ?? {}) };
+              const updateLandscape = (patch: Partial<LandscapeParams>) =>
+                onUpdateSim({ landscape: { ...lp, ...patch } });
+              return (
+                <section className="section-card">
+                  <h2 className="section-heading">3D Landscape Manifold</h2>
+                  <SliderRow
+                    label="Ridge Ratio (ρ)"
+                    value={lp.ridgeRatio}
+                    min={0.2}
+                    max={0.95}
+                    step={0.02}
+                    formatValue={(v) => `${Math.round(v * 100)}%`}
+                    onChange={(ridgeRatio) => updateLandscape({ ridgeRatio })}
+                  />
+                  <SliderRow
+                    label="Ridge Sharpness (p)"
+                    value={lp.ridgeSharpness}
+                    min={1.5}
+                    max={4.5}
+                    step={0.1}
+                    formatValue={(v) => v.toFixed(1)}
+                    onChange={(ridgeSharpness) => updateLandscape({ ridgeSharpness })}
+                  />
+                  <SliderRow
+                    label="Plane Slope (α)"
+                    value={lp.planeSlopeAlpha}
+                    min={-0.6}
+                    max={0.6}
+                    step={0.02}
+                    formatValue={(v) => v.toFixed(2)}
+                    onChange={(planeSlopeAlpha) => updateLandscape({ planeSlopeAlpha })}
+                  />
+                  <SliderRow
+                    label="Terrain Relief (H)"
+                    value={lp.terrainRoughness}
+                    min={0}
+                    max={1.2}
+                    step={0.02}
+                    formatValue={(v) => v.toFixed(2)}
+                    onChange={(terrainRoughness) => updateLandscape({ terrainRoughness })}
+                  />
+                  <SliderRow
+                    label="3D Curl Scale (L)"
+                    value={lp.curlScale}
+                    min={1.0}
+                    max={6.0}
+                    step={0.1}
+                    formatValue={(v) => v.toFixed(1)}
+                    onChange={(curlScale) => updateLandscape({ curlScale })}
+                  />
+                  <SliderRow
+                    label="Aperture CoC (k)"
+                    value={lp.apertureScale}
+                    min={0.5}
+                    max={7.5}
+                    step={0.1}
+                    formatValue={(v) => v.toFixed(1)}
+                    onChange={(apertureScale) => updateLandscape({ apertureScale })}
+                  />
+                  <SliderRow
+                    label="Core Incandescence (μ)"
+                    value={lp.coreIncandescence}
+                    min={0}
+                    max={1.0}
+                    step={0.02}
+                    formatValue={(v) => `${Math.round(v * 100)}%`}
+                    onChange={(coreIncandescence) => updateLandscape({ coreIncandescence })}
+                  />
+                </section>
+              );
+            })()}
 
             <section className="section-card">
               <div className="section-heading">
