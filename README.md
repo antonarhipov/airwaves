@@ -1,6 +1,6 @@
 # Airwaves Studio
 
-**Live App**: https://antonarhipov.github.io/airwaves/
+**Live App**: https://antonarhipov.com/airwaves/
 
 **Airwaves Studio** is an interactive, deterministic procedural particle-art generator for creating splash screen variations inspired by IntelliJ IDEA 2026.3 and acoustic airwave streams. Every composition is driven purely by mathematical algorithms—harmonic guiding curves, Simplex/Perlin curl noise, Runge-Kutta advection, and GPU optical bokeh shaders—with no AI APIs or raster textures.
 
