@@ -104,7 +104,8 @@ export const SplashViewport = forwardRef<SplashViewportHandle, SplashViewportPro
         const dt = Math.min(0.05, (now - lastNow) / 1000);
         lastNow = now;
         if (visualRef.current.animateFlow) {
-          timeRef.current += dt * visualRef.current.animationSpeed;
+          // Base time multiplier (0.2) scales down real-time flow rate 5x across all presets & slider range
+          timeRef.current += dt * visualRef.current.animationSpeed * 0.2;
         }
         renderer.render(timeRef.current);
         rafId = requestAnimationFrame(loop);
