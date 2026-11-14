@@ -430,6 +430,15 @@ export class SplashRenderer {
     this.bloomPass.resolution.set(safeW * pixelRatio, safeH * pixelRatio);
   }
 
+  /** Return the current logical dimensions and device pixel ratio of the renderer. */
+  getViewportState(): { width: number; height: number; pixelRatio: number } {
+    return {
+      width: this.width,
+      height: this.height,
+      pixelRatio: this.pixelRatio,
+    };
+  }
+
   render(timeSec: number): void {
     this.curveUniforms.uTime.value = timeSec;
     this.trailUniforms.uTime.value = timeSec;
@@ -438,26 +447,33 @@ export class SplashRenderer {
   }
 
   /**
+   * Render a single frame at the renderer's current resolution and copy it
+   * into the provided 2D canvas context. Callers exporting batches should invoke
+   * `resize(...)` once before looping and restore `getViewportState()` afterwards.
+   */
+  renderToContext(timeSec: number, ctx: CanvasRenderingContext2D, targetW: number, targetH: number): void {
+    this.render(timeSec);
+    ctx.drawImage(this.canvas, 0, 0, targetW, targetH);
+  }
+
+  /**
    * Render a crisp frame at arbitrary target export pixel dimensions and return
    * an HTMLCanvasElement copy, then immediately restore the interactive preview viewport.
    */
   renderHighResFrame(exportW: number, exportH: number, timeSec: number): HTMLCanvasElement {
-    const prevW = this.width;
-    const prevH = this.height;
-    const prevDpr = this.pixelRatio;
+    const prev = this.getViewportState();
 
     this.resize(exportW, exportH, 1);
-    this.render(timeSec);
 
     const outCanvas = document.createElement('canvas');
     outCanvas.width = exportW;
     outCanvas.height = exportH;
     const ctx = outCanvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(this.canvas, 0, 0, exportW, exportH);
+      this.renderToContext(timeSec, ctx, exportW, exportH);
     }
 
-    this.resize(prevW, prevH, prevDpr);
+    this.resize(prev.width, prev.height, prev.pixelRatio);
     this.render(timeSec);
 
     return outCanvas;

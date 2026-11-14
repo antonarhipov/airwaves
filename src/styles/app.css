@@ -607,6 +607,52 @@ input[type="color"] {
   font-weight: 600;
 }
 
+.btn:disabled,
+.select-input:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.video-export-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.video-export-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-block-size: 32px;
+  padding: 0.2rem 0.45rem;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+.video-progress-track {
+  inline-size: 64px;
+  block-size: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.video-progress-fill {
+  block-size: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+  transition: width 0.08s linear;
+}
+
+.video-progress-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  min-inline-size: 34px;
+  text-align: end;
+}
+
 /* Focus indicators */
 :where(button, input, select, a):focus-visible {
   outline: 2px solid var(--focus-ring);

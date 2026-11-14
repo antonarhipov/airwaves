@@ -1,15 +1,22 @@
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import {
   Download,
+  Film,
   PanelRightClose,
   PanelRightOpen,
   Pause,
   Play,
   Shuffle,
   Waves,
+  X,
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { SplashViewport, type SplashViewportHandle } from './components/SplashViewport';
+import {
+  VIDEO_DURATION_OPTIONS,
+  type VideoDurationOption,
+  type VideoExportProgress,
+} from './export/videoExporter';
 import { generateRandomSeed } from './math/prng';
 import { runSimulation } from './simulation/particleSim';
 import type {
@@ -51,10 +58,14 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showFieldNodes, setShowFieldNodes] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [videoDuration, setVideoDuration] = useState<VideoDurationOption>(10);
+  const [videoProgress, setVideoProgress] = useState<VideoExportProgress | null>(null);
 
   const viewportRef = useRef<SplashViewportHandle | null>(null);
+  const videoAbortRef = useRef<AbortController | null>(null);
   const seedInputId = useId();
   const exportResId = useId();
+  const videoDurationId = useId();
 
   // Strictly decoupled: simulation ONLY recalculates when config.sim changes.
   const simData = useMemo(() => runSimulation(config.sim), [config.sim]);
@@ -194,6 +205,56 @@ export function App() {
     setStatusMessage(`Exported ${filename} (${width} × ${height} PNG)`);
   }, []);
 
+  const handleExportMp4 = useCallback(async () => {
+    const viewport = viewportRef.current;
+    if (!viewport || videoAbortRef.current) return;
+
+    const controller = new AbortController();
+    videoAbortRef.current = controller;
+    setVideoProgress({
+      frameIndex: 0,
+      totalFrames: videoDuration * 30,
+      phase: 'encoding',
+      backend: 'webcodecs',
+    });
+    setStatusMessage(`Encoding ${videoDuration}s MP4 video…`);
+
+    try {
+      const result = await viewport.exportMp4({
+        exportWidth: config.canvas.exportWidth,
+        seed: config.sim.seed,
+        durationSec: videoDuration,
+        signal: controller.signal,
+        onProgress: setVideoProgress,
+      });
+      if (result) {
+        const sizeMb = (result.byteLength / (1024 * 1024)).toFixed(2);
+        setStatusMessage(
+          `Exported ${result.filename} (${result.width} × ${result.height}, ${result.durationSec}s MP4, ${sizeMb} MB)`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setStatusMessage('Cancelled MP4 export');
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatusMessage(`MP4 export failed: ${msg}`);
+      }
+    } finally {
+      videoAbortRef.current = null;
+      setVideoProgress(null);
+    }
+  }, [config.canvas.exportWidth, config.sim.seed, videoDuration]);
+
+  const handleCancelMp4 = useCallback(() => {
+    videoAbortRef.current?.abort();
+  }, []);
+
+  const isExportingVideo = videoProgress !== null;
+  const exportPercent = videoProgress
+    ? Math.min(100, Math.round((videoProgress.frameIndex / Math.max(1, videoProgress.totalFrames)) * 100))
+    : 0;
+
   const ratio = ASPECT_RATIOS[config.canvas.aspectRatio].ratio;
   const exportHeight = Math.round(config.canvas.exportWidth / ratio);
 
@@ -262,6 +323,7 @@ export function App() {
             className="select-input"
             style={{ width: 'auto', minBlockSize: '32px' }}
             value={config.canvas.exportWidth}
+            disabled={isExportingVideo}
             onChange={(e) => updateCanvas({ exportWidth: Number(e.target.value) })}
           >
             {EXPORT_WIDTH_OPTIONS.map((opt) => {
@@ -274,10 +336,61 @@ export function App() {
             })}
           </select>
 
-          <button type="button" className="btn btn-primary" onClick={handleExport}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={isExportingVideo}
+            onClick={handleExport}
+          >
             <Download size={14} aria-hidden="true" />
             <span>Export PNG</span>
           </button>
+
+          <div className="video-export-group">
+            <label htmlFor={videoDurationId} className="visually-hidden">
+              MP4 Duration
+            </label>
+            <select
+              id={videoDurationId}
+              className="select-input"
+              style={{ width: 'auto', minBlockSize: '32px' }}
+              value={videoDuration}
+              disabled={isExportingVideo}
+              onChange={(e) => setVideoDuration(Number(e.target.value) as VideoDurationOption)}
+            >
+              {VIDEO_DURATION_OPTIONS.map((sec) => (
+                <option key={sec} value={sec}>
+                  {sec}s MP4
+                </option>
+              ))}
+            </select>
+
+            {isExportingVideo ? (
+              <div className="video-export-progress" role="status" aria-live="polite">
+                <div className="video-progress-track" aria-hidden="true">
+                  <div className="video-progress-fill" style={{ width: `${exportPercent}%` }} />
+                </div>
+                <span className="video-progress-label">
+                  {videoProgress?.phase === 'finalizing' ? 'Muxing…' : `${exportPercent}%`}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={handleCancelMp4}
+                  aria-label="Cancel MP4 export"
+                  title="Cancel MP4 export"
+                >
+                  <X size={13} aria-hidden="true" />
+                  <span>Cancel</span>
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="btn" onClick={handleExportMp4}>
+                <Film size={14} aria-hidden="true" />
+                <span>Export MP4</span>
+              </button>
+            )}
+          </div>
 
           <button
             type="button"

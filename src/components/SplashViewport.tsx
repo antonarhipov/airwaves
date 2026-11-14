@@ -8,6 +8,13 @@ import {
 } from 'react';
 import { SplashRenderer } from '../rendering/SplashRenderer';
 import { drawTypographyAndLogo } from '../rendering/overlayRenderer';
+import {
+  REALTIME_MOTION_SCALE,
+  exportCompositionToMp4,
+  sanitizeSeedForFilename,
+  type VideoExportProgress,
+  type VideoExportResult,
+} from '../export/videoExporter';
 import type { SimulationData } from '../simulation/particleSim';
 import type {
   AspectRatioId,
@@ -19,6 +26,13 @@ import { ASPECT_RATIOS } from '../types/presets';
 
 export interface SplashViewportHandle {
   exportPng: (exportWidth: number, seed: string) => void;
+  exportMp4: (options: {
+    exportWidth: number;
+    seed: string;
+    durationSec: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: VideoExportProgress) => void;
+  }) => Promise<VideoExportResult | null>;
 }
 
 interface SplashViewportProps {
@@ -57,6 +71,7 @@ export const SplashViewport = forwardRef<SplashViewportHandle, SplashViewportPro
     const timeRef = useRef(0);
     const visualRef = useRef(visual);
     visualRef.current = visual;
+    const isExportingRef = useRef(false);
 
     const [frameSize, setFrameSize] = useState({ width: 960, height: 540 });
     const draggingIdRef = useRef<string | null>(null);
@@ -103,11 +118,12 @@ export const SplashViewport = forwardRef<SplashViewportHandle, SplashViewportPro
       const loop = (now: number) => {
         const dt = Math.min(0.05, (now - lastNow) / 1000);
         lastNow = now;
-        if (visualRef.current.animateFlow) {
-          // Base time multiplier (0.2) scales down real-time flow rate 5x across all presets & slider range
-          timeRef.current += dt * visualRef.current.animationSpeed * 0.2;
+        if (!isExportingRef.current) {
+          if (visualRef.current.animateFlow) {
+            timeRef.current += dt * visualRef.current.animationSpeed * REALTIME_MOTION_SCALE;
+          }
+          renderer.render(timeRef.current);
         }
-        renderer.render(timeRef.current);
         rafId = requestAnimationFrame(loop);
       };
       rafId = requestAnimationFrame(loop);
@@ -145,13 +161,13 @@ export const SplashViewport = forwardRef<SplashViewportHandle, SplashViewportPro
       drawTypographyAndLogo(ctx, frameSize.width, frameSize.height, typography);
     }, [frameSize, typography]);
 
-    // Export high-resolution PNG combining WebGL frame + crisp vector typography/logo
+    // Export high-resolution PNG or deterministic H.264 MP4 combining WebGL frame + crisp vector typography/logo
     useImperativeHandle(
       ref,
       () => ({
         exportPng: (exportWidth: number, seed: string) => {
           const renderer = rendererRef.current;
-          if (!renderer) return;
+          if (!renderer || isExportingRef.current) return;
           const targetW = Math.max(320, Math.round(exportWidth));
           const targetH = Math.max(320, Math.round(targetW / ratio));
 
@@ -164,8 +180,7 @@ export const SplashViewport = forwardRef<SplashViewportHandle, SplashViewportPro
           composite.toBlob((blob) => {
             if (!blob) return;
             const url = URL.createObjectURL(blob);
-            const safeSeed = seed.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 32) || 'splash';
-            const filename = `airwaves-${safeSeed}-${targetW}x${targetH}.png`;
+            const filename = `airwaves-${sanitizeSeedForFilename(seed)}-${targetW}x${targetH}.png`;
             const a = document.createElement('a');
             a.href = url;
             a.download = filename;
@@ -175,6 +190,28 @@ export const SplashViewport = forwardRef<SplashViewportHandle, SplashViewportPro
             URL.revokeObjectURL(url);
             onExportComplete(filename, targetW, targetH);
           }, 'image/png');
+        },
+        exportMp4: async ({ exportWidth, seed, durationSec, signal, onProgress }) => {
+          const renderer = rendererRef.current;
+          if (!renderer || isExportingRef.current) return null;
+
+          isExportingRef.current = true;
+          try {
+            return await exportCompositionToMp4({
+              renderer,
+              typography,
+              seed,
+              startTimeSec: timeRef.current,
+              exportWidth,
+              aspectRatio: ratio,
+              durationSec,
+              animationSpeed: visualRef.current.animationSpeed,
+              signal,
+              onProgress,
+            });
+          } finally {
+            isExportingRef.current = false;
+          }
         },
       }),
       [ratio, typography, onExportComplete],
