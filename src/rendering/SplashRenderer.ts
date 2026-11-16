@@ -112,6 +112,7 @@ export class SplashRenderer {
 
     const sharedLandscapeUniforms = () => ({
       uSeed: { value: 42026 },
+      uLayoutMode: { value: 0 },
       uCurvature: { value: 1.0 },
       uDispersion: { value: 0.35 },
       uWorldDim: { value: new THREE.Vector2(18.0, 7.0) },
@@ -214,6 +215,7 @@ export class SplashRenderer {
       const lp = landscape.params;
       const syncLandscape = (u: Record<string, THREE.IUniform>) => {
         u.uSeed.value = landscape.seedU32;
+        u.uLayoutMode.value = landscape.layoutMode;
         u.uCurvature.value = landscape.curvature;
         u.uDispersion.value = landscape.dispersion;
         u.uWorldDim.value.set(lp.worldWidth, lp.worldDepth);

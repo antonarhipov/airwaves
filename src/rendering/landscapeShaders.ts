@@ -3,6 +3,7 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
   uniform float uTime;
   uniform float uAnimate;
   uniform int uSeed;
+  uniform int uLayoutMode;
   uniform float uCurvature;
   uniform float uDispersion;
   uniform vec2 uWorldDim;       // (W, D)
@@ -146,16 +147,62 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
   LandscapeCamPoint evaluateLandscapeCam(float u, float v, float tSec) {
     uint seed = uint(uSeed);
     float curv = max(0.2, uCurvature);
-    float x0 = (u - 0.5) * uWorldDim.x;
-    float z0 = v * uWorldDim.y;
-    float yPlane = uPlaneSlope.x * x0 + uPlaneSlope.y * z0;
 
-    float h1 = 1.28 * curv * sin(4.2 * curv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
-    float h2 = 0.54 * curv * sin(7.4 * curv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
-    float h3 = 0.16 * curv * sin(10.8 * curv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
+    float x0;
+    float y0;
+    float z0;
+    float tColor;
+    float cosP = 0.9838437;  // cos(-0.18)
+    float sinP = -0.1790296; // sin(-0.18)
+    float cosRoll = 1.0;
+    float sinRoll = 0.0;
+    float screenScale = 1.0;
+    float uRipple = sin(3.14159265 * u);
 
-    float relief = uTerrainRough * 0.75 * fbm2DStateless(u * 2.8, v * 2.2, seed);
-    float y0 = yPlane + h1 + h2 + h3 + relief;
+    if (uLayoutMode == 4) {
+      float theta = u * 6.2831853 + tSec * 0.14;
+      float ringR = max(2.8, uWorldDim.x * 0.26) + v * uWorldDim.y * 0.36;
+      x0 = cos(theta) * ringR;
+      z0 = sin(theta) * ringR;
+      float yPlane = uPlaneSlope.y * 0.9 * z0;
+
+      float h1 = 0.72 * curv * sin(3.0 * theta + 0.35 * ringR - 0.85 * tSec + 0.35);
+      float h2 = 0.32 * curv * sin(5.0 * theta - 0.45 * ringR - 1.35 * tSec + 1.85);
+      float h3 = 0.11 * curv * sin(8.0 * theta + 0.62 * ringR - 1.85 * tSec + 0.92);
+      float relief = uTerrainRough * 0.65 * fbm2DStateless(cos(theta) * 1.35 + 1.7, sin(theta) * 1.35 + v * 0.8, seed);
+      y0 = yPlane + h1 + h2 + h3 + relief;
+
+      cosP = 0.9427547;  // cos(-0.34)
+      sinP = -0.3334871; // sin(-0.34)
+      uRipple = 0.85;
+      tColor = clamp(0.5 + 0.42 * cos(theta - 0.4) + 0.08 * v + 0.04 * y0, 0.0, 1.0);
+    } else {
+      float centralWeight = uLayoutMode == 2 ? 1.0 : 0.0;
+      float horizFactor = (uLayoutMode == 1 || uLayoutMode == 2) ? 0.0 : (uLayoutMode == 3 ? 0.25 : 1.0);
+
+      float xSpan = uWorldDim.x * (uLayoutMode == 2 ? 0.92 : 1.0);
+      x0 = (u - 0.5) * xSpan;
+      float pinch = uLayoutMode == 2 ? 0.62 + 0.55 * abs(u - 0.5) * 2.0 : 1.0;
+      float zArch = centralWeight * ((u - 0.5) * (u - 0.5) * 4.0 * 1.35);
+      z0 = v * uWorldDim.y * pinch + zArch;
+
+      float yPlane =
+        uPlaneSlope.x * horizFactor * x0 + uPlaneSlope.y * (uLayoutMode == 2 ? 0.45 : 1.0) * z0;
+
+      float crestBoost = 1.0 + centralWeight * 0.32 * uRipple;
+      float h1 = 1.28 * curv * crestBoost * sin(4.2 * curv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
+      float h2 = 0.54 * curv * sin(7.4 * curv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
+      float h3 = 0.16 * curv * sin(10.8 * curv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
+      float relief = uTerrainRough * 0.75 * fbm2DStateless(u * 2.8, v * 2.2, seed);
+      y0 = yPlane + h1 + h2 + h3 + relief;
+
+      if (uLayoutMode == 3) {
+        cosRoll = 0.0;
+        sinRoll = 1.0;
+        screenScale = 0.68;
+      }
+      tColor = clamp(u + 0.08 * v + 0.055 * y0, 0.0, 1.0);
+    }
 
     float invCurl = 1.0 / max(0.35, uCurlScale);
     vec3 p0 = vec3(x0, y0, z0);
@@ -163,25 +210,23 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
     vec3 curlVec = curl3DStateless(p0 * invCurl + drift, seed);
 
     float dispBoost = 0.65 + uDispersion * 1.1;
-    float sinPiU = sin(3.14159265 * u);
     float envelope =
-      (uCurlStrength.x * 0.45 + uCurlStrength.y * pow(abs(v), 1.4) + uCurlStrength.z * sinPiU * sinPiU * 0.55) *
+      (uCurlStrength.x * 0.45 + uCurlStrength.y * pow(abs(v), 1.4) + uCurlStrength.z * uRipple * uRipple * 0.55) *
       dispBoost;
 
     vec3 pWorld = p0 + envelope * curlVec;
 
-    const float cosP = 0.9838437; // cos(-0.18)
-    const float sinP = -0.1790296; // sin(-0.18)
     float xc = pWorld.x;
     float yc = pWorld.y * cosP + pWorld.z * sinP;
     float zc = max(2.0, uFocalDepth + (-pWorld.y * sinP + pWorld.z * cosP));
 
+    float xr = (xc * cosRoll - yc * sinRoll) * screenScale;
+    float yr = (xc * sinRoll + yc * cosRoll) * screenScale;
     float focalProj = 2.48;
     vec2 ndc = vec2(
-      (focalProj * xc) / (zc * max(0.4, uAspect)),
-      (focalProj * yc) / zc
+      (focalProj * xr) / (zc * max(0.4, uAspect)),
+      (focalProj * yr) / zc
     );
-    float tColor = clamp(u + 0.08 * v + 0.055 * y0, 0.0, 1.0);
 
     LandscapeCamPoint res;
     res.ndc = ndc;
@@ -237,7 +282,7 @@ export const LANDSCAPE_PARTICLE_VERTEX_SHADER = /* glsl */ `
     // Energy-conserving thin-lens luminance falloff preserving rich palette hue + luminous dust bokeh
     float ratio = min(1.0, rMin / max(0.01, rBokeh));
     float energyConserv = pow(ratio, uBokehDecay * mix(0.68, 0.90, isRidge));
-    float edgeU = pow(max(0.0, sin(3.14159265 * u)), 0.65);
+    float edgeU = uLayoutMode == 4 ? 1.0 : pow(max(0.0, sin(3.14159265 * u)), 0.65);
     float edgeV = exp(-0.34 * v * v);
     float popBoost = mix(1.35, 1.38, isRidge);
 
@@ -315,7 +360,7 @@ export const LANDSCAPE_LINE_VERTEX_SHADER = /* glsl */ `
 
     float focalShift = uFocalDepth - uFocalPlane * 4.2;
     float cocDepth = abs(camPt.zCam - focalShift);
-    float endFade = pow(max(0.0, sin(3.14159265 * u)), 0.55);
+    float endFade = uLayoutMode == 4 ? 1.0 : pow(max(0.0, sin(3.14159265 * u)), 0.55);
     float depthFade = 1.0 / (1.0 + cocDepth * (0.35 + uDofStrength * 0.25));
 
     vT = camPt.tColor;

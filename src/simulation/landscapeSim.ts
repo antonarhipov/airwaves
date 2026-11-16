@@ -1,8 +1,30 @@
 import { hashSeed } from '../math/prng';
 import { curl3DStateless, fbm2DStateless, halton, hashIntToFloat, murmurMix32 } from '../math/statelessHash';
-import type { LandscapeParams, SimParams } from '../types/config';
+import type { CompositionPreset, LandscapeParams, SimParams } from '../types/config';
 import { FIELD_GRID_H, FIELD_GRID_W, getSafeZoneTarget } from './flowField';
 import type { SimulationData } from './particleSim';
+
+/**
+ * Integer layout selector shared identically with GLSL3 `uLayoutMode`:
+ * 0 = diagonal-flow, 1 = horizontal-flow, 2 = central-wave, 3 = vertical-flow, 4 = radial-flow.
+ */
+export type LandscapeLayoutCode = 0 | 1 | 2 | 3 | 4;
+
+export function compositionToLandscapeLayout(composition: CompositionPreset): LandscapeLayoutCode {
+  switch (composition) {
+    case 'horizontal-flow':
+      return 1;
+    case 'central-wave':
+      return 2;
+    case 'vertical-flow':
+      return 3;
+    case 'radial-flow':
+      return 4;
+    case 'diagonal-flow':
+    default:
+      return 0;
+  }
+}
 
 export const DEFAULT_LANDSCAPE_PARAMS: LandscapeParams = {
   ridgeRatio: 0.7,
@@ -23,6 +45,7 @@ export const DEFAULT_LANDSCAPE_PARAMS: LandscapeParams = {
 
 export interface LandscapeMetadata {
   seedU32: number;
+  layoutMode: LandscapeLayoutCode;
   curvature: number;
   dispersion: number;
   params: LandscapeParams;
@@ -65,20 +88,67 @@ export function evaluateLandscapePoint(
   seedU32: number,
   aspect = 16 / 9,
   includeCurl = true,
+  layoutMode: LandscapeLayoutCode = 0,
 ): EvaluatedLandscapeSample {
   const curv = Math.max(0.2, curvature);
-  const x0 = (u - 0.5) * lp.worldWidth;
-  const z0 = v * lp.worldDepth;
-  const yPlane = lp.planeSlopeAlpha * x0 + lp.planeTiltBeta * z0;
 
-  // Multi-harmonic rolling sine crests (K = 3)
-  const h1 = 1.28 * curv * Math.sin(4.2 * curv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
-  const h2 = 0.54 * curv * Math.sin(7.4 * curv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
-  const h3 = 0.16 * curv * Math.sin(10.8 * curv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
+  let x0: number;
+  let z0: number;
+  let y0: number;
+  let tColor: number;
+  let camPitch = -0.18;
+  let cosRoll = 1.0;
+  let sinRoll = 0.0;
+  let screenScale = 1.0;
 
-  // 2D stateless fBm terrain relief
-  const relief = includeCurl ? lp.terrainRoughness * 0.75 * fbm2DStateless(u * 2.8, v * 2.2, seedU32, 3) : 0;
-  const y0 = yPlane + h1 + h2 + h3 + relief;
+  if (layoutMode === 4) {
+    // Radial vortex ring manifold (periodic in u so curves & dust wrap smoothly 360°)
+    const theta = u * Math.PI * 2 + tSec * 0.14;
+    const ringR = Math.max(2.8, lp.worldWidth * 0.26) + v * lp.worldDepth * 0.36;
+    x0 = Math.cos(theta) * ringR;
+    z0 = Math.sin(theta) * ringR;
+    const yPlane = lp.planeTiltBeta * 0.9 * z0;
+
+    const h1 = 0.72 * curv * Math.sin(3.0 * theta + 0.35 * ringR - 0.85 * tSec + 0.35);
+    const h2 = 0.32 * curv * Math.sin(5.0 * theta - 0.45 * ringR - 1.35 * tSec + 1.85);
+    const h3 = 0.11 * curv * Math.sin(8.0 * theta + 0.62 * ringR - 1.85 * tSec + 0.92);
+    const relief = includeCurl
+      ? lp.terrainRoughness *
+        0.65 *
+        fbm2DStateless(Math.cos(theta) * 1.35 + 1.7, Math.sin(theta) * 1.35 + v * 0.8, seedU32, 3)
+      : 0;
+    y0 = yPlane + h1 + h2 + h3 + relief;
+    camPitch = -0.34;
+    tColor = Math.max(0, Math.min(1, 0.5 + 0.42 * Math.cos(theta - 0.4) + 0.08 * v + 0.04 * y0));
+  } else {
+    const centralWeight = layoutMode === 2 ? 1.0 : 0.0;
+    const horizFactor = layoutMode === 1 ? 0.0 : layoutMode === 2 ? 0.0 : layoutMode === 3 ? 0.25 : 1.0;
+
+    const xSpan = lp.worldWidth * (layoutMode === 2 ? 0.92 : 1.0);
+    x0 = (u - 0.5) * xSpan;
+    const pinch = layoutMode === 2 ? 0.62 + 0.55 * Math.abs(u - 0.5) * 2.0 : 1.0;
+    const zArch = centralWeight * ((u - 0.5) * (u - 0.5) * 4.0 * 1.35);
+    z0 = v * lp.worldDepth * pinch + zArch;
+
+    const yPlane =
+      lp.planeSlopeAlpha * horizFactor * x0 + lp.planeTiltBeta * (layoutMode === 2 ? 0.45 : 1.0) * z0;
+
+    const crestBoost = 1.0 + centralWeight * 0.32 * Math.sin(Math.PI * u);
+    const h1 = 1.28 * curv * crestBoost * Math.sin(4.2 * curv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
+    const h2 = 0.54 * curv * Math.sin(7.4 * curv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
+    const h3 = 0.16 * curv * Math.sin(10.8 * curv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
+
+    const relief = includeCurl ? lp.terrainRoughness * 0.75 * fbm2DStateless(u * 2.8, v * 2.2, seedU32, 3) : 0;
+    y0 = yPlane + h1 + h2 + h3 + relief;
+
+    if (layoutMode === 3) {
+      // Vertical cascade roll (+90 deg) before aspect division keeps balanced column framing
+      cosRoll = 0.0;
+      sinRoll = 1.0;
+      screenScale = 0.68;
+    }
+    tColor = Math.max(0, Math.min(1, u + 0.08 * v + 0.055 * y0));
+  }
 
   let xWorld = x0;
   let yWorld = y0;
@@ -100,29 +170,27 @@ export function evaluateLandscapePoint(
     const gamma0 = lp.curlCoreStrength * 0.45 * dispBoost;
     const gamma1 = lp.curlOuterStrength * dispBoost;
     const gamma2 = 0.28 * 0.55 * dispBoost;
-    const sinPiU = Math.sin(Math.PI * u);
+    const uRipple = layoutMode === 4 ? 0.85 : Math.sin(Math.PI * u);
     const absV = Math.abs(v);
-    const envelope = gamma0 + gamma1 * Math.pow(absV, 1.4) + gamma2 * sinPiU * sinPiU;
+    const envelope = gamma0 + gamma1 * Math.pow(absV, 1.4) + gamma2 * uRipple * uRipple;
 
     xWorld += envelope * cx;
     yWorld += envelope * cy;
     zWorld += envelope * cz;
   }
 
-  // Section 6.1: Camera pitch transform & perspective projection
-  const camPitch = -0.18;
+  // Section 6.1: Camera pitch & layout roll transform + perspective projection
   const cosP = Math.cos(camPitch);
   const sinP = Math.sin(camPitch);
   const xc = xWorld;
   const yc = yWorld * cosP + zWorld * sinP;
   const zc = Math.max(2.0, lp.focalDepth + (-yWorld * sinP + zWorld * cosP));
 
+  const xr = (xc * cosRoll - yc * sinRoll) * screenScale;
+  const yr = (xc * sinRoll + yc * cosRoll) * screenScale;
   const focalProj = 2.48;
-  const xNdc = (focalProj * xc) / (zc * Math.max(0.4, aspect));
-  const yNdc = (focalProj * yc) / zc;
-
-  // Section 6.3: Spectral parameter s = clamp(u + dv*v + dy*y0, 0, 1)
-  const tColor = Math.max(0, Math.min(1, u + 0.08 * v + 0.055 * y0));
+  const xNdc = (focalProj * xr) / (zc * Math.max(0.4, aspect));
+  const yNdc = (focalProj * yr) / zc;
 
   return {
     xWorld,
@@ -143,6 +211,7 @@ export function evaluateLandscapePoint(
 export function generateLandscapeSimulation(params: SimParams): SimulationData {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const lp = resolveLandscapeParams(params);
+  const layoutMode = compositionToLandscapeLayout(params.composition);
   // Mask to 31-bit non-negative int so CPU & GLSL3 `uint(uSeed)` match identically
   const seedU32 = hashSeed(params.seed) & 0x7fffffff;
 
@@ -202,6 +271,7 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
       seedU32,
       16 / 9,
       false,
+      layoutMode,
     );
 
     // Map NDC-scaled normalized space for generic CPU assertions & fallback buffers
@@ -211,13 +281,13 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
     positions[i * 3 + 1] = normY;
     positions[i * 3 + 2] = Math.max(-1, Math.min(1, (pt.zCam - lp.focalDepth) / 4.5));
 
-    velocities[i * 2] = 0.98;
-    velocities[i * 2 + 1] = lp.planeSlopeAlpha * 0.6;
+    velocities[i * 2] = layoutMode === 3 ? 0 : 0.98;
+    velocities[i * 2 + 1] = layoutMode === 3 ? 0.98 : lp.planeSlopeAlpha * 0.6;
 
     const rMin = 1.1;
     const rBokeh = rMin + lp.apertureScale * pt.cocDepth;
     const energyConserv = Math.pow(rMin / rBokeh, lp.bokehDecay);
-    const edgeU = Math.pow(Math.max(0, Math.sin(Math.PI * u)), 0.75);
+    const edgeU = layoutMode === 4 ? 1.0 : Math.pow(Math.max(0, Math.sin(Math.PI * u)), 0.75);
     const edgeV = Math.exp(-0.55 * v * v);
     const safeMask = safeZoneAtten(normX, normY);
     const energy = (isRidge ? 1.15 : 0.75) * energyConserv * edgeU * edgeV * 2.5 * safeMask;
@@ -257,13 +327,24 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
 
     for (let j = 0; j < stepsPerCurve; j++) {
       const uj = j / (stepsPerCurve - 1);
-      const pt = evaluateLandscapePoint(uj, vm, 0, params.curvature, params.dispersion, lp, seedU32);
+      const pt = evaluateLandscapePoint(
+        uj,
+        vm,
+        0,
+        params.curvature,
+        params.dispersion,
+        lp,
+        seedU32,
+        16 / 9,
+        true,
+        layoutMode,
+      );
       ptsX[j] = (pt.xNdc * (16 / 9)) / 1.25;
       ptsY[j] = pt.yNdc / 1.15;
       ptsT[j] = pt.tColor;
       ptsU[j] = uj;
 
-      const endFade = Math.pow(Math.max(0, Math.sin(uj * Math.PI)), 0.55);
+      const endFade = layoutMode === 4 ? 1.0 : Math.pow(Math.max(0, Math.sin(uj * Math.PI)), 0.55);
       const depthFade = 1.0 / (1.0 + pt.cocDepth * 0.45);
       ptsAlpha[j] = 0.85 * endFade * depthFade;
     }
@@ -312,6 +393,7 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
     fieldGridHeight: FIELD_GRID_H,
     landscape: {
       seedU32,
+      layoutMode,
       curvature: params.curvature,
       dispersion: params.dispersion,
       params: lp,

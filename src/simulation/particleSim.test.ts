@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, STUDIO_PRESETS } from '../types/presets';
-import { DEFAULT_LANDSCAPE_PARAMS, evaluateLandscapePoint } from './landscapeSim';
+import {
+  DEFAULT_LANDSCAPE_PARAMS,
+  compositionToLandscapeLayout,
+  evaluateLandscapePoint,
+} from './landscapeSim';
 import { runSimulation } from './particleSim';
 
 describe('Deterministic Particle Airwave Simulation', () => {
@@ -155,5 +159,44 @@ describe('Deterministic Particle Airwave Simulation', () => {
     expect(ptT2.yWorld).not.toBe(ptT0.yWorld);
     expect(Number.isFinite(ptT2.xNdc)).toBe(true);
     expect(Number.isFinite(ptT2.yNdc)).toBe(true);
+  });
+
+  it('produces distinct coherent 3D landscape geometry across all 5 composition layouts', () => {
+    const preset = STUDIO_PRESETS.find((p) => p.id === 'landscape-champagne-wave')!;
+    const layouts = [
+      'diagonal-flow',
+      'horizontal-flow',
+      'central-wave',
+      'vertical-flow',
+      'radial-flow',
+    ] as const;
+
+    const snapshots: Array<{ layoutMode: number; x0: number; y0: number }> = [];
+    for (const composition of layouts) {
+      const sim = runSimulation({
+        ...preset.config.sim,
+        composition,
+        particleCount: 1000,
+        guidingCurves: 6,
+      });
+      expect(sim.landscape?.layoutMode).toBe(compositionToLandscapeLayout(composition));
+      for (let i = 0; i < sim.positions.length; i++) {
+        expect(Number.isFinite(sim.positions[i])).toBe(true);
+      }
+      snapshots.push({
+        layoutMode: sim.landscape!.layoutMode,
+        x0: sim.positions[0],
+        y0: sim.positions[1],
+      });
+    }
+
+    expect(new Set(snapshots.map((s) => s.layoutMode)).size).toBe(5);
+    expect(new Set(snapshots.map((s) => `${s.x0.toFixed(4)},${s.y0.toFixed(4)}`)).size).toBe(5);
+
+    // Radial vortex ring closes seamlessly at u = 0 and u = 1
+    const radial0 = evaluateLandscapePoint(0, 0, 0, 1.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026, 16 / 9, true, 4);
+    const radial1 = evaluateLandscapePoint(1, 0, 0, 1.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026, 16 / 9, true, 4);
+    expect(radial0.xNdc).toBeCloseTo(radial1.xNdc, 5);
+    expect(radial0.yNdc).toBeCloseTo(radial1.yNdc, 5);
   });
 });
