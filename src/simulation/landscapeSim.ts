@@ -1,6 +1,12 @@
 import { hashSeed } from '../math/prng';
 import { curl3DStateless, fbm2DStateless, halton, hashIntToFloat, murmurMix32 } from '../math/statelessHash';
-import type { CompositionPreset, LandscapeParams, SimParams, SizeDistribution } from '../types/config';
+import type {
+  CompositionPreset,
+  FlowDirection,
+  LandscapeParams,
+  SimParams,
+  SizeDistribution,
+} from '../types/config';
 import { FIELD_GRID_H, FIELD_GRID_W, getSafeZoneTarget } from './flowField';
 import type { SimulationData } from './particleSim';
 
@@ -59,6 +65,32 @@ export function compositionToLandscapeLayout(composition: CompositionPreset): La
   }
 }
 
+/**
+ * Unify Composition Layout, Flow Direction, and Flow Angle into a 3D manifold
+ * layout code and optical screen-plane roll angle (radians).
+ */
+export function resolveLandscapeOrientation(
+  composition: CompositionPreset,
+  flowDirection: FlowDirection,
+  flowAngleDeg: number,
+): { layoutMode: LandscapeLayoutCode; flowRollRad: number } {
+  let layoutMode: LandscapeLayoutCode = compositionToLandscapeLayout(composition);
+
+  if (flowDirection === 'radial' || composition === 'radial-flow') {
+    layoutMode = 4;
+  } else if (composition === 'central-wave') {
+    layoutMode = 2;
+  } else if (flowDirection !== 'diagonal') {
+    layoutMode = flowDirection === 'horizontal' ? 1 : 3;
+  }
+
+  const baseRollDeg =
+    layoutMode === 3 || (layoutMode === 2 && flowDirection === 'vertical') ? 90 : 0;
+  const flowRollRad = ((baseRollDeg + flowAngleDeg) * Math.PI) / 180;
+
+  return { layoutMode, flowRollRad };
+}
+
 export const DEFAULT_LANDSCAPE_PARAMS: LandscapeParams = {
   ridgeRatio: 0.7,
   ridgeSharpness: 3.2,
@@ -79,6 +111,7 @@ export const DEFAULT_LANDSCAPE_PARAMS: LandscapeParams = {
 export interface LandscapeMetadata {
   seedU32: number;
   layoutMode: LandscapeLayoutCode;
+  flowRollRad: number;
   curvature: number;
   dispersion: number;
   params: LandscapeParams;
@@ -86,6 +119,8 @@ export interface LandscapeMetadata {
   particleDomain: Float32Array;
   /** [u_j, v_m] per streamline curve vertex */
   curveDomain: Float32Array;
+  /** [u_k, v_k, fadeWeight] per motion-trail segment vertex */
+  trailDomain: Float32Array;
 }
 
 export function resolveLandscapeParams(sim: SimParams): LandscapeParams {
@@ -122,17 +157,23 @@ export function evaluateLandscapePoint(
   aspect = 16 / 9,
   includeCurl = true,
   layoutMode: LandscapeLayoutCode = 0,
+  flowRollRad?: number,
 ): EvaluatedLandscapeSample {
-  const curv = Math.max(0.2, curvature);
+  const ampCurv = Math.max(0.0, curvature);
+  const freqCurv = 0.5 + 0.5 * ampCurv;
 
   let x0: number;
   let z0: number;
   let y0: number;
   let tColor: number;
   let camPitch = -0.18;
-  let cosRoll = 1.0;
-  let sinRoll = 0.0;
-  let screenScale = 1.0;
+  const effectiveRoll = flowRollRad ?? (layoutMode === 3 ? Math.PI / 2 : 0);
+  const cosRoll = Math.cos(effectiveRoll);
+  const sinRoll = Math.sin(effectiveRoll);
+  const screenScale =
+    layoutMode === 4
+      ? 1.0 - 0.16 * Math.abs(sinRoll)
+      : 1.0 - 0.32 * Math.abs(sinRoll);
 
   if (layoutMode === 4) {
     // Radial vortex ring manifold (periodic in u so curves & dust wrap smoothly 360°)
@@ -142,9 +183,9 @@ export function evaluateLandscapePoint(
     z0 = Math.sin(theta) * ringR;
     const yPlane = lp.planeTiltBeta * 0.9 * z0;
 
-    const h1 = 0.72 * curv * Math.sin(3.0 * theta + 0.35 * ringR - 0.85 * tSec + 0.35);
-    const h2 = 0.32 * curv * Math.sin(5.0 * theta - 0.45 * ringR - 1.35 * tSec + 1.85);
-    const h3 = 0.11 * curv * Math.sin(8.0 * theta + 0.62 * ringR - 1.85 * tSec + 0.92);
+    const h1 = 0.72 * ampCurv * Math.sin(3.0 * theta + 0.35 * ringR - 0.85 * tSec + 0.35);
+    const h2 = 0.32 * ampCurv * Math.sin(5.0 * theta - 0.45 * ringR - 1.35 * tSec + 1.85);
+    const h3 = 0.11 * ampCurv * Math.sin(8.0 * theta + 0.62 * ringR - 1.85 * tSec + 0.92);
     const relief = includeCurl
       ? lp.terrainRoughness *
         0.65 *
@@ -167,19 +208,13 @@ export function evaluateLandscapePoint(
       lp.planeSlopeAlpha * horizFactor * x0 + lp.planeTiltBeta * (layoutMode === 2 ? 0.45 : 1.0) * z0;
 
     const crestBoost = 1.0 + centralWeight * 0.32 * Math.sin(Math.PI * u);
-    const h1 = 1.28 * curv * crestBoost * Math.sin(4.2 * curv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
-    const h2 = 0.54 * curv * Math.sin(7.4 * curv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
-    const h3 = 0.16 * curv * Math.sin(10.8 * curv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
+    const h1 = 1.28 * ampCurv * crestBoost * Math.sin(4.2 * freqCurv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
+    const h2 = 0.54 * ampCurv * Math.sin(7.4 * freqCurv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
+    const h3 = 0.16 * ampCurv * Math.sin(10.8 * freqCurv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
 
     const relief = includeCurl ? lp.terrainRoughness * 0.75 * fbm2DStateless(u * 2.8, v * 2.2, seedU32, 3) : 0;
     y0 = yPlane + h1 + h2 + h3 + relief;
 
-    if (layoutMode === 3) {
-      // Vertical cascade roll (+90 deg) before aspect division keeps balanced column framing
-      cosRoll = 0.0;
-      sinRoll = 1.0;
-      screenScale = 0.68;
-    }
     tColor = Math.max(0, Math.min(1, u + 0.08 * v + 0.055 * y0));
   }
 
@@ -244,7 +279,11 @@ export function evaluateLandscapePoint(
 export function generateLandscapeSimulation(params: SimParams): SimulationData {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const lp = resolveLandscapeParams(params);
-  const layoutMode = compositionToLandscapeLayout(params.composition);
+  const { layoutMode, flowRollRad } = resolveLandscapeOrientation(
+    params.composition,
+    params.flowDirection,
+    params.flowAngle,
+  );
   // Mask to 31-bit non-negative int so CPU & GLSL3 `uint(uSeed)` match identically
   const seedU32 = hashSeed(params.seed) & 0x7fffffff;
 
@@ -306,6 +345,7 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
       16 / 9,
       false,
       layoutMode,
+      flowRollRad,
     );
 
     // Map NDC-scaled normalized space for generic CPU assertions & fallback buffers
@@ -372,6 +412,7 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
         16 / 9,
         true,
         layoutMode,
+        flowRollRad,
       );
       ptsX[j] = (pt.xNdc * (16 / 9)) / 1.25;
       ptsY[j] = pt.yNdc / 1.15;
@@ -402,6 +443,57 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
     }
   }
 
+  // Motion trails along parametric wave coordinate u scaled by params.trailLength
+  const trailParticleCount = params.trailLength > 0.02 ? Math.min(count, 4200) : 0;
+  const trailSegsPerParticle = 2;
+  const trailVertexCount = trailParticleCount * trailSegsPerParticle * 2;
+  const trailPositions = new Float32Array(trailVertexCount * 2);
+  const trailAnchors = new Float32Array(trailVertexCount * 3);
+  const trailAttributes = new Float32Array(trailVertexCount * 2);
+  const trailDomain = new Float32Array(trailVertexCount * 3);
+
+  if (trailParticleCount > 0) {
+    const span = 0.012 + params.trailLength * 0.068;
+    let trailPtr = 0;
+    for (let tIdx = 0; tIdx < trailParticleCount; tIdx++) {
+      const pIdx = Math.min(count - 1, Math.floor((tIdx * count) / trailParticleCount));
+      const uHead = particleDomain[pIdx * 4];
+      const vTrail = particleDomain[pIdx * 4 + 1];
+      const normX = positions[pIdx * 3];
+      const normY = positions[pIdx * 3 + 1];
+      const tCol = attributes[pIdx * 4];
+      const safeMask = safeZoneAtten(normX, normY);
+      const baseFade = Math.min(1.0, attributes[pIdx * 4 + 2] * 0.45) * safeMask;
+
+      const uSamples = [
+        layoutMode === 4 ? uHead - span : Math.max(0.0, uHead - span),
+        layoutMode === 4 ? uHead - span * 0.5 : Math.max(0.0, uHead - span * 0.5),
+        uHead,
+      ];
+      const fades = [0.0, baseFade * 0.48, baseFade];
+
+      for (let s = 0; s < trailSegsPerParticle; s++) {
+        trailDomain[trailPtr * 3] = uSamples[s];
+        trailDomain[trailPtr * 3 + 1] = vTrail;
+        trailDomain[trailPtr * 3 + 2] = fades[s];
+        trailPositions[trailPtr * 2] = normX;
+        trailPositions[trailPtr * 2 + 1] = normY;
+        trailAttributes[trailPtr * 2] = tCol;
+        trailAttributes[trailPtr * 2 + 1] = fades[s];
+        trailPtr++;
+
+        trailDomain[trailPtr * 3] = uSamples[s + 1];
+        trailDomain[trailPtr * 3 + 1] = vTrail;
+        trailDomain[trailPtr * 3 + 2] = fades[s + 1];
+        trailPositions[trailPtr * 2] = normX;
+        trailPositions[trailPtr * 2 + 1] = normY;
+        trailAttributes[trailPtr * 2] = tCol;
+        trailAttributes[trailPtr * 2 + 1] = fades[s + 1];
+        trailPtr++;
+      }
+    }
+  }
+
   const fieldGrid = new Float32Array(FIELD_GRID_W * FIELD_GRID_H * 2);
   for (let i = 0; i < FIELD_GRID_W * FIELD_GRID_H; i++) {
     fieldGrid[i * 2] = 0.96;
@@ -415,10 +507,10 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
     positions,
     velocities,
     attributes,
-    trailPositions: new Float32Array(0),
-    trailAnchors: new Float32Array(0),
-    trailAttributes: new Float32Array(0),
-    trailVertexCount: 0,
+    trailPositions,
+    trailAnchors,
+    trailAttributes,
+    trailVertexCount,
     curvePositions,
     curveAttributes,
     curveVertexCount,
@@ -428,11 +520,13 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
     landscape: {
       seedU32,
       layoutMode,
+      flowRollRad,
       curvature: params.curvature,
       dispersion: params.dispersion,
       params: lp,
       particleDomain,
       curveDomain,
+      trailDomain,
     },
     computeTimeMs: Math.round((t1 - t0) * 10) / 10,
   };

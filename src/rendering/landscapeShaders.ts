@@ -4,6 +4,7 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
   uniform float uAnimate;
   uniform int uSeed;
   uniform int uLayoutMode;
+  uniform float uFlowRoll;
   uniform float uCurvature;
   uniform float uDispersion;
   uniform vec2 uWorldDim;       // (W, D)
@@ -146,7 +147,8 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
 
   LandscapeCamPoint evaluateLandscapeCam(float u, float v, float tSec) {
     uint seed = uint(uSeed);
-    float curv = max(0.2, uCurvature);
+    float ampCurv = max(0.0, uCurvature);
+    float freqCurv = 0.5 + 0.5 * ampCurv;
 
     float x0;
     float y0;
@@ -154,9 +156,12 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
     float tColor;
     float cosP = 0.9838437;  // cos(-0.18)
     float sinP = -0.1790296; // sin(-0.18)
-    float cosRoll = 1.0;
-    float sinRoll = 0.0;
-    float screenScale = 1.0;
+    float cosRoll = cos(uFlowRoll);
+    float sinRoll = sin(uFlowRoll);
+    float screenScale =
+      uLayoutMode == 4
+        ? 1.0 - 0.16 * abs(sinRoll)
+        : 1.0 - 0.32 * abs(sinRoll);
     float uRipple = sin(3.14159265 * u);
 
     if (uLayoutMode == 4) {
@@ -166,9 +171,9 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
       z0 = sin(theta) * ringR;
       float yPlane = uPlaneSlope.y * 0.9 * z0;
 
-      float h1 = 0.72 * curv * sin(3.0 * theta + 0.35 * ringR - 0.85 * tSec + 0.35);
-      float h2 = 0.32 * curv * sin(5.0 * theta - 0.45 * ringR - 1.35 * tSec + 1.85);
-      float h3 = 0.11 * curv * sin(8.0 * theta + 0.62 * ringR - 1.85 * tSec + 0.92);
+      float h1 = 0.72 * ampCurv * sin(3.0 * theta + 0.35 * ringR - 0.85 * tSec + 0.35);
+      float h2 = 0.32 * ampCurv * sin(5.0 * theta - 0.45 * ringR - 1.35 * tSec + 1.85);
+      float h3 = 0.11 * ampCurv * sin(8.0 * theta + 0.62 * ringR - 1.85 * tSec + 0.92);
       float relief = uTerrainRough * 0.65 * fbm2DStateless(cos(theta) * 1.35 + 1.7, sin(theta) * 1.35 + v * 0.8, seed);
       y0 = yPlane + h1 + h2 + h3 + relief;
 
@@ -190,17 +195,12 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
         uPlaneSlope.x * horizFactor * x0 + uPlaneSlope.y * (uLayoutMode == 2 ? 0.45 : 1.0) * z0;
 
       float crestBoost = 1.0 + centralWeight * 0.32 * uRipple;
-      float h1 = 1.28 * curv * crestBoost * sin(4.2 * curv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
-      float h2 = 0.54 * curv * sin(7.4 * curv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
-      float h3 = 0.16 * curv * sin(10.8 * curv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
+      float h1 = 1.28 * ampCurv * crestBoost * sin(4.2 * freqCurv * u + 0.42 * z0 - 0.85 * tSec + 0.35);
+      float h2 = 0.54 * ampCurv * sin(7.4 * freqCurv * u - 0.55 * z0 - 1.35 * tSec + 1.85);
+      float h3 = 0.16 * ampCurv * sin(10.8 * freqCurv * u + 0.72 * z0 - 1.85 * tSec + 0.92);
       float relief = uTerrainRough * 0.75 * fbm2DStateless(u * 2.8, v * 2.2, seed);
       y0 = yPlane + h1 + h2 + h3 + relief;
 
-      if (uLayoutMode == 3) {
-        cosRoll = 0.0;
-        sinRoll = 1.0;
-        screenScale = 0.68;
-      }
       tColor = clamp(u + 0.08 * v + 0.055 * y0, 0.0, 1.0);
     }
 
@@ -364,6 +364,36 @@ export const LANDSCAPE_LINE_VERTEX_SHADER = /* glsl */ `
 
     vT = camPt.tColor;
     vAlpha = 0.88 * endFade * depthFade;
+
+    gl_Position = vec4(camPt.ndc, 0.0, 1.0);
+  }
+`;
+
+export const LANDSCAPE_TRAIL_VERTEX_SHADER = /* glsl */ `
+  in vec3 aTrailDomain; // (u_k, v_k, fadeWeight)
+
+  uniform float uDofStrength;
+  uniform float uFocalPlane;
+
+  out float vT;
+  out float vAlpha;
+
+  ${GLSL3_LANDSCAPE_EVAL}
+
+  void main() {
+    float u = aTrailDomain.x;
+    float v = aTrailDomain.y;
+    float tSec = uAnimate > 0.5 ? uTime : 0.0;
+
+    LandscapeCamPoint camPt = evaluateLandscapeCam(u, v, tSec);
+
+    float focalShift = uFocalDepth - uFocalPlane * 4.2;
+    float cocDepth = abs(camPt.zCam - focalShift);
+    float endFade = uLayoutMode == 4 ? 1.0 : pow(max(0.0, sin(3.14159265 * clamp(u, 0.0, 1.0))), 0.45);
+    float depthFade = 1.0 / (1.0 + cocDepth * (0.28 + uDofStrength * 0.22));
+
+    vT = camPt.tColor;
+    vAlpha = aTrailDomain.z * endFade * depthFade * 1.15;
 
     gl_Position = vec4(camPt.ndc, 0.0, 1.0);
   }

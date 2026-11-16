@@ -233,4 +233,51 @@ describe('Deterministic Particle Airwave Simulation', () => {
       expect(highVar.stdDev).toBeGreaterThan(lowVar.stdDev * 1.4);
     }
   });
+
+  it('applies all 5 Flow & Dispersion controls (flowDirection, flowAngle, curvature, dispersion, trailLength) in 3D Landscape', () => {
+    const preset = STUDIO_PRESETS.find((p) => p.id === 'landscape-champagne-wave')!;
+
+    // 1. Flow Direction alters 3D projection even when Composition Layout stays at default diagonal-flow
+    const dirSnapshots = (['diagonal', 'horizontal', 'vertical', 'radial'] as const).map((flowDirection) => {
+      const sim = runSimulation({
+        ...preset.config.sim,
+        flowDirection,
+        particleCount: 1000,
+        guidingCurves: 4,
+      });
+      return `${sim.landscape!.layoutMode}:${sim.positions[0].toFixed(3)},${sim.positions[1].toFixed(3)}`;
+    });
+    expect(new Set(dirSnapshots).size).toBe(4);
+
+    // 2. Flow Angle rotates the 3D manifold continuously
+    const simAngle0 = runSimulation({ ...preset.config.sim, flowAngle: 0, particleCount: 600, guidingCurves: 2 });
+    const simAngle65 = runSimulation({ ...preset.config.sim, flowAngle: 65, particleCount: 600, guidingCurves: 2 });
+    expect(simAngle65.landscape!.flowRollRad).toBeGreaterThan(simAngle0.landscape!.flowRollRad);
+    expect(simAngle65.positions[1]).not.toBeCloseTo(simAngle0.positions[1], 3);
+
+    // 3. Wave Curvature 0.00 flattens waves relative to Curvature 2.00
+    const flatPt = evaluateLandscapePoint(0.25, 0.0, 0, 0.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026, 16 / 9, false, 1, 0);
+    const highPt = evaluateLandscapePoint(0.25, 0.0, 0, 2.0, 0.35, DEFAULT_LANDSCAPE_PARAMS, 42026, 16 / 9, false, 1, 0);
+    expect(Math.abs(flatPt.yWorld)).toBeLessThan(0.01);
+    expect(Math.abs(highPt.yWorld)).toBeGreaterThan(1.0);
+
+    // 4. Dispersion Spread widens lateral v spread across particles
+    const lowDisp = runSimulation({ ...preset.config.sim, dispersion: 0.05, particleCount: 1000, guidingCurves: 2 });
+    const highDisp = runSimulation({ ...preset.config.sim, dispersion: 1.4, particleCount: 1000, guidingCurves: 2 });
+    let lowMaxV = 0;
+    let highMaxV = 0;
+    for (let i = 0; i < 1000; i++) {
+      lowMaxV = Math.max(lowMaxV, Math.abs(lowDisp.landscape!.particleDomain[i * 4 + 1]));
+      highMaxV = Math.max(highMaxV, Math.abs(highDisp.landscape!.particleDomain[i * 4 + 1]));
+    }
+    expect(highMaxV).toBeGreaterThan(lowMaxV * 1.5);
+
+    // 5. Trail Length generates 3D trail segments when > 0.02 and none at 0.0
+    const noTrails = runSimulation({ ...preset.config.sim, trailLength: 0, particleCount: 800, guidingCurves: 2 });
+    const withTrails = runSimulation({ ...preset.config.sim, trailLength: 0.85, particleCount: 800, guidingCurves: 2 });
+    expect(noTrails.trailVertexCount).toBe(0);
+    expect(noTrails.landscape!.trailDomain.length).toBe(0);
+    expect(withTrails.trailVertexCount).toBeGreaterThan(0);
+    expect(withTrails.landscape!.trailDomain.length).toBe(withTrails.trailVertexCount * 3);
+  });
 });

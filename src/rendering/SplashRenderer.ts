@@ -16,6 +16,7 @@ import {
   LANDSCAPE_LINE_VERTEX_SHADER,
   LANDSCAPE_PARTICLE_FRAGMENT_SHADER,
   LANDSCAPE_PARTICLE_VERTEX_SHADER,
+  LANDSCAPE_TRAIL_VERTEX_SHADER,
 } from './landscapeShaders';
 import {
   BG_FRAGMENT_SHADER,
@@ -113,6 +114,7 @@ export class SplashRenderer {
     const sharedLandscapeUniforms = () => ({
       uSeed: { value: 42026 },
       uLayoutMode: { value: 0 },
+      uFlowRoll: { value: 0 },
       uCurvature: { value: 1.0 },
       uDispersion: { value: 0.35 },
       uWorldDim: { value: new THREE.Vector2(18.0, 7.0) },
@@ -142,9 +144,12 @@ export class SplashRenderer {
     this.trailUniforms = {
       ...sharedPaletteUniforms(),
       ...sharedFieldUniforms(),
+      ...sharedLandscapeUniforms(),
       uAspect: { value: 16 / 9 },
       uTime: { value: 0 },
       uAnimate: { value: 1 },
+      uDofStrength: { value: 1.0 },
+      uFocalPlane: { value: 0.05 },
       uOpacity: { value: 0.6 },
       uBrightness: { value: 1.0 },
     };
@@ -216,6 +221,7 @@ export class SplashRenderer {
       const syncLandscape = (u: Record<string, THREE.IUniform>) => {
         u.uSeed.value = landscape.seedU32;
         u.uLayoutMode.value = landscape.layoutMode;
+        u.uFlowRoll.value = landscape.flowRollRad;
         u.uCurvature.value = landscape.curvature;
         u.uDispersion.value = landscape.dispersion;
         u.uWorldDim.value.set(lp.worldWidth, lp.worldDepth);
@@ -229,6 +235,7 @@ export class SplashRenderer {
         u.uCoreIncandescence.value = lp.coreIncandescence;
       };
       syncLandscape(this.curveUniforms);
+      syncLandscape(this.trailUniforms);
       syncLandscape(this.particleUniforms);
     }
 
@@ -290,19 +297,34 @@ export class SplashRenderer {
       const trailGeo = new THREE.BufferGeometry();
       const dummyPos = new Float32Array(sim.trailVertexCount * 3);
       trailGeo.setAttribute('position', new THREE.BufferAttribute(dummyPos, 3));
-      trailGeo.setAttribute('aPosition', new THREE.BufferAttribute(sim.trailPositions, 2));
-      trailGeo.setAttribute('aLineAttr', new THREE.BufferAttribute(sim.trailAttributes, 2));
-      trailGeo.setAttribute('aAnchor', new THREE.BufferAttribute(sim.trailAnchors, 3));
 
-      const trailMat = new THREE.ShaderMaterial({
-        vertexShader: LINE_VERTEX_SHADER,
-        fragmentShader: LINE_FRAGMENT_SHADER,
-        uniforms: this.trailUniforms,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthTest: false,
-        depthWrite: false,
-      });
+      let trailMat: THREE.ShaderMaterial;
+      if (landscape && landscape.trailDomain.length > 0) {
+        trailGeo.setAttribute('aTrailDomain', new THREE.BufferAttribute(landscape.trailDomain, 3));
+        trailMat = new THREE.ShaderMaterial({
+          vertexShader: LANDSCAPE_TRAIL_VERTEX_SHADER,
+          fragmentShader: LANDSCAPE_LINE_FRAGMENT_SHADER,
+          glslVersion: THREE.GLSL3,
+          uniforms: this.trailUniforms,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+      } else {
+        trailGeo.setAttribute('aPosition', new THREE.BufferAttribute(sim.trailPositions, 2));
+        trailGeo.setAttribute('aLineAttr', new THREE.BufferAttribute(sim.trailAttributes, 2));
+        trailGeo.setAttribute('aAnchor', new THREE.BufferAttribute(sim.trailAnchors, 3));
+        trailMat = new THREE.ShaderMaterial({
+          vertexShader: LINE_VERTEX_SHADER,
+          fragmentShader: LINE_FRAGMENT_SHADER,
+          uniforms: this.trailUniforms,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+      }
       this.trailLines = new THREE.LineSegments(trailGeo, trailMat);
       this.trailLines.frustumCulled = false;
       this.trailLines.renderOrder = 2;
@@ -397,6 +419,8 @@ export class SplashRenderer {
     this.trailUniforms.uOpacity.value = visual.trailFade * 0.65;
     this.trailUniforms.uBrightness.value = visual.particleBrightness;
     this.trailUniforms.uAnimate.value = visual.animateFlow ? 1 : 0;
+    this.trailUniforms.uDofStrength.value = visual.dofStrength;
+    this.trailUniforms.uFocalPlane.value = visual.focalPlane;
 
     applyPalette(this.particleUniforms);
     this.particleUniforms.uDofStrength.value = visual.dofStrength;
