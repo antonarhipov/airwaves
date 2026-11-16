@@ -273,23 +273,22 @@ export const LANDSCAPE_PARTICLE_VERTEX_SHADER = /* glsl */ `
     float cocDepth = abs(camPt.zCam - focalShift);
 
     float aperture = max(0.1, uApertureScale * uDofStrength);
-    float rBokeh = clamp(
-      rMin * sizeSeed * uParticleSize + aperture * cocDepth * scaleRef * mix(0.95, 0.52, isRidge) * (0.45 + 0.55 * sizeSeed),
-      rMin * 0.85,
-      62.0 * scaleRef
-    );
+    float rBase = max(rMin * 0.85, rMin * sizeSeed * uParticleSize);
+    float rDefocus = aperture * cocDepth * scaleRef * mix(0.95, 0.52, isRidge) * (0.45 + 0.55 * sizeSeed);
+    float rBokeh = clamp(rBase + rDefocus, rMin * 0.85, 62.0 * scaleRef);
 
-    // Energy-conserving thin-lens luminance falloff preserving rich palette hue + luminous dust bokeh
-    float ratio = min(1.0, rMin / max(0.01, rBokeh));
-    float energyConserv = pow(ratio, uBokehDecay * mix(0.68, 0.90, isRidge));
+    // Conserve energy primarily across thin-lens DoF defocus so enlarged orbs/sparks remain luminous
+    float dofRatio = min(1.0, rBase / max(0.01, rBokeh));
+    float sizeSoftDamp = pow(min(1.0, 1.35 / max(0.35, sizeSeed)), 0.35);
+    float energyConserv = pow(dofRatio, uBokehDecay * mix(0.68, 0.90, isRidge)) * sizeSoftDamp;
     float edgeU = uLayoutMode == 4 ? 1.0 : pow(max(0.0, sin(3.14159265 * u)), 0.65);
     float edgeV = exp(-0.34 * v * v);
     float popBoost = mix(1.35, 1.38, isRidge);
 
     vT = camPt.tColor;
-    vBokehBlur = clamp((rBokeh - rMin * sizeSeed * uParticleSize) / (12.0 * scaleRef), 0.0, 1.0);
+    vBokehBlur = clamp((rBokeh - rBase) / (12.0 * scaleRef), 0.0, 1.0);
     vEnergy = energyConserv * edgeU * edgeV * popBoost * 1.95 * uDensityNorm;
-    vIncandescence = exp(-4.2 * v * v) * pow(ratio, 0.95) * uCoreIncandescence * 0.42 * mix(0.15, 1.0, isRidge);
+    vIncandescence = exp(-4.2 * v * v) * pow(dofRatio, 0.95) * uCoreIncandescence * 0.42 * mix(0.15, 1.0, isRidge);
 
     vec2 ndcOffset = (position.xy * rBokeh * 2.0) / uResolution;
     gl_Position = vec4(camPt.ndc + ndcOffset, 0.0, 1.0);

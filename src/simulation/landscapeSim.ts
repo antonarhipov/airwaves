@@ -1,6 +1,6 @@
 import { hashSeed } from '../math/prng';
 import { curl3DStateless, fbm2DStateless, halton, hashIntToFloat, murmurMix32 } from '../math/statelessHash';
-import type { CompositionPreset, LandscapeParams, SimParams } from '../types/config';
+import type { CompositionPreset, LandscapeParams, SimParams, SizeDistribution } from '../types/config';
 import { FIELD_GRID_H, FIELD_GRID_W, getSafeZoneTarget } from './flowField';
 import type { SimulationData } from './particleSim';
 
@@ -9,6 +9,39 @@ import type { SimulationData } from './particleSim';
  * 0 = diagonal-flow, 1 = horizontal-flow, 2 = central-wave, 3 = vertical-flow, 4 = radial-flow.
  */
 export type LandscapeLayoutCode = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * Sample deterministic per-particle size multiplier for the 3D Landscape generator
+ * across all four SizeDistribution modes and normalized [0..1] sizeVariance.
+ */
+export function computeLandscapeParticleSizeSeed(
+  sizeDistribution: SizeDistribution,
+  sizeVariance: number,
+  isRidge: boolean,
+  hSize: number,
+  hSpark: number,
+): number {
+  const sv = Math.max(0, Math.min(1, sizeVariance));
+  let raw: number;
+
+  if (sizeDistribution === 'power-law') {
+    raw = 0.82 * (1 - 0.58 * sv) + Math.pow(hSize, 2.4) * sv * (isRidge ? 3.8 : 5.4);
+  } else if (sizeDistribution === 'fine-dust') {
+    raw = 0.56 * (1 - 0.42 * sv) + Math.pow(hSize, 1.3) * sv * (isRidge ? 1.45 : 2.1);
+  } else if (sizeDistribution === 'uniform') {
+    raw = 0.95 + (hSize - 0.5) * (sv * 1.45);
+  } else {
+    // 'bimodal-bokeh': smooth lerp from tight uniform grain at sv=0 to contrasting sparks + large bokeh at sv=1
+    const baseMicro = 0.78 * (1 - 0.55 * sv) + hSize * sv * 0.78;
+    if (isRidge) {
+      raw = hSpark < 0.045 ? 0.82 + sv * (1.5 + hSize * 2.1) : baseMicro;
+    } else {
+      raw = hSize > 0.8 ? 0.82 + sv * (1.2 + hSize * 3.4) : baseMicro;
+    }
+  }
+
+  return Math.max(0.32, Math.min(8.5, raw));
+}
 
 export function compositionToLandscapeLayout(composition: CompositionPreset): LandscapeLayoutCode {
   switch (composition) {
@@ -253,12 +286,13 @@ export function generateLandscapeSimulation(params: SimParams): SimulationData {
       ? Math.sign(vRaw) * Math.pow(Math.abs(vRaw), ridgeSharpness)
       : vRaw * dustScatter;
 
-    let sizeSeed: number;
-    if (isRidge) {
-      sizeSeed = hSpark < 0.015 ? 1.9 + hSize * 1.1 : 0.48 + Math.pow(hSize, 1.8) * 0.92;
-    } else {
-      sizeSeed = hSize > 0.88 ? 2.2 + hSize * 2.8 * (0.5 + params.sizeVariance) : 0.44 + hSize * 1.1;
-    }
+    const sizeSeed = computeLandscapeParticleSizeSeed(
+      params.sizeDistribution,
+      params.sizeVariance,
+      isRidge,
+      hSize,
+      hSpark,
+    );
 
     // GPU GLSL3 evaluates full 3D fBm + Curl in hardware O(1); CPU keeps fast perspective projection
     const pt = evaluateLandscapePoint(

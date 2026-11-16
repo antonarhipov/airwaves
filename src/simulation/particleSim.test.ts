@@ -199,4 +199,38 @@ describe('Deterministic Particle Airwave Simulation', () => {
     expect(radial0.xNdc).toBeCloseTo(radial1.xNdc, 5);
     expect(radial0.yNdc).toBeCloseTo(radial1.yNdc, 5);
   });
+
+  it('applies Size Distribution and Size Variance cleanly across 3D Landscape particles', () => {
+    const preset = STUDIO_PRESETS.find((p) => p.id === 'landscape-champagne-wave')!;
+    const dists = ['bimodal-bokeh', 'power-law', 'fine-dust', 'uniform'] as const;
+
+    const getSizeStats = (sizeDistribution: (typeof dists)[number], sizeVariance: number) => {
+      const sim = runSimulation({
+        ...preset.config.sim,
+        sizeDistribution,
+        sizeVariance,
+        particleCount: 2000,
+        guidingCurves: 4,
+      });
+      const domain = sim.landscape!.particleDomain;
+      const sizes: number[] = [];
+      for (let i = 0; i < sim.particleCount; i++) {
+        sizes.push(domain[i * 4 + 2]);
+      }
+      const mean = sizes.reduce((a, b) => a + b, 0) / sizes.length;
+      const stdDev = Math.sqrt(sizes.reduce((acc, s) => acc + (s - mean) ** 2, 0) / sizes.length);
+      return { mean, stdDev };
+    };
+
+    const statsByDist = dists.map((d) => getSizeStats(d, 0.72));
+    // Each distribution mode should create a measurable signature in size spread / mean
+    expect(new Set(statsByDist.map((s) => `${s.mean.toFixed(2)},${s.stdDev.toFixed(2)}`)).size).toBe(4);
+
+    // Higher sizeVariance widens particle size variance for every distribution mode
+    for (const dist of dists) {
+      const lowVar = getSizeStats(dist, 0.0);
+      const highVar = getSizeStats(dist, 1.0);
+      expect(highVar.stdDev).toBeGreaterThan(lowVar.stdDev * 1.4);
+    }
+  });
 });
