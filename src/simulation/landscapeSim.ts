@@ -252,7 +252,7 @@ export function evaluateLandscapePoint(
   const sinP = Math.sin(camPitch);
   const xc = xWorld;
   const yc = yWorld * cosP + zWorld * sinP;
-  const zc = Math.max(2.0, lp.focalDepth + (-yWorld * sinP + zWorld * cosP));
+  const zc = Math.max(1.2, lp.focalDepth + (-yWorld * sinP + zWorld * cosP));
 
   const xr = (xc * cosRoll - yc * sinRoll) * screenScale;
   const yr = (xc * sinRoll + yc * cosRoll) * screenScale;

@@ -280,4 +280,40 @@ describe('Deterministic Particle Airwave Simulation', () => {
     expect(withTrails.trailVertexCount).toBeGreaterThan(0);
     expect(withTrails.landscape!.trailDomain.length).toBe(withTrails.trailVertexCount * 3);
   });
+
+  it('scales 3D Landscape perspective projection cleanly along Z-axis POV distance', () => {
+    const close = evaluateLandscapePoint(
+      0.22,
+      0.15,
+      0,
+      1.0,
+      0.35,
+      { ...DEFAULT_LANDSCAPE_PARAMS, focalDepth: 5.0 },
+      42026,
+    );
+    const neutral = evaluateLandscapePoint(
+      0.22,
+      0.15,
+      0,
+      1.0,
+      0.35,
+      { ...DEFAULT_LANDSCAPE_PARAMS, focalDepth: 12.5 },
+      42026,
+    );
+    const far = evaluateLandscapePoint(
+      0.22,
+      0.15,
+      0,
+      1.0,
+      0.35,
+      { ...DEFAULT_LANDSCAPE_PARAMS, focalDepth: 26.0 },
+      42026,
+    );
+
+    expect(close.zCam).toBeLessThan(neutral.zCam);
+    expect(neutral.zCam).toBeLessThan(far.zCam);
+    expect(Math.hypot(close.xNdc, close.yNdc)).toBeGreaterThan(Math.hypot(neutral.xNdc, neutral.yNdc));
+    expect(Math.hypot(far.xNdc, far.yNdc)).toBeLessThan(Math.hypot(neutral.xNdc, neutral.yNdc));
+    expect(Number.isFinite(close.xNdc) && Number.isFinite(far.yNdc)).toBe(true);
+  });
 });

@@ -414,6 +414,15 @@ export function Sidebar({
                 <section className="section-card">
                   <h2 className="section-heading">3D Landscape Manifold</h2>
                   <SliderRow
+                    label="POV Distance (Z)"
+                    value={lp.focalDepth}
+                    min={4.5}
+                    max={28.0}
+                    step={0.25}
+                    formatValue={(v) => v.toFixed(1)}
+                    onChange={(focalDepth) => updateLandscape({ focalDepth })}
+                  />
+                  <SliderRow
                     label="Ridge Ratio (ρ)"
                     value={lp.ridgeRatio}
                     min={0.2}

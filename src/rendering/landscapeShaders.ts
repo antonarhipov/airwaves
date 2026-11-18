@@ -218,7 +218,7 @@ const GLSL3_LANDSCAPE_EVAL = /* glsl */ `
 
     float xc = pWorld.x;
     float yc = pWorld.y * cosP + pWorld.z * sinP;
-    float zc = max(2.0, uFocalDepth + (-pWorld.y * sinP + pWorld.z * cosP));
+    float zc = max(1.2, uFocalDepth + (-pWorld.y * sinP + pWorld.z * cosP));
 
     float xr = (xc * cosRoll - yc * sinRoll) * screenScale;
     float yr = (xc * sinRoll + yc * cosRoll) * screenScale;
@@ -273,7 +273,8 @@ export const LANDSCAPE_PARTICLE_VERTEX_SHADER = /* glsl */ `
     float cocDepth = abs(camPt.zCam - focalShift);
 
     float aperture = max(0.1, uApertureScale * uDofStrength);
-    float rBase = max(rMin * 0.85, rMin * sizeSeed * uParticleSize);
+    float perspScale = clamp(12.5 / max(2.0, camPt.zCam), 0.45, 2.35);
+    float rBase = max(rMin * 0.85, rMin * sizeSeed * uParticleSize * perspScale);
     float rDefocus = aperture * cocDepth * scaleRef * mix(0.95, 0.52, isRidge) * (0.45 + 0.55 * sizeSeed);
     float rBokeh = clamp(rBase + rDefocus, rMin * 0.85, 62.0 * scaleRef);
 
@@ -283,11 +284,12 @@ export const LANDSCAPE_PARTICLE_VERTEX_SHADER = /* glsl */ `
     float energyConserv = pow(dofRatio, uBokehDecay * mix(0.68, 0.90, isRidge)) * sizeSoftDamp;
     float edgeU = uLayoutMode == 4 ? 1.0 : pow(max(0.0, sin(3.14159265 * u)), 0.65);
     float edgeV = exp(-0.34 * v * v);
+    float nearFade = smoothstep(1.2, 2.4, camPt.zCam);
     float popBoost = mix(1.35, 1.38, isRidge);
 
     vT = camPt.tColor;
     vBokehBlur = clamp((rBokeh - rBase) / (12.0 * scaleRef), 0.0, 1.0);
-    vEnergy = energyConserv * edgeU * edgeV * popBoost * 1.95 * uDensityNorm;
+    vEnergy = energyConserv * edgeU * edgeV * popBoost * nearFade * 1.95 * uDensityNorm;
     vIncandescence = exp(-4.2 * v * v) * pow(dofRatio, 0.95) * uCoreIncandescence * 0.42 * mix(0.15, 1.0, isRidge);
 
     vec2 ndcOffset = (position.xy * rBokeh * 2.0) / uResolution;
